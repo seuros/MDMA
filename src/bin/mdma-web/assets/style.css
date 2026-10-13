@@ -168,10 +168,24 @@ input, select, textarea {
   border: 1px solid var(--baseline);
   border-radius: 6px;
   padding: 0.35rem 0.5rem;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
 }
 textarea { resize: vertical; }
 input:focus, select:focus, textarea:focus { outline: 2px solid var(--series-1); outline-offset: 0; }
-.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 0.75rem; }
+.grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 0.75rem;
+}
+.grid > label { min-width: 0; }
+.grid > label > span {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+label.check input { width: auto; }
 .actions { display: flex; gap: 0.5rem; margin: 0.25rem 0 0.75rem; }
 button {
   font: inherit;
@@ -234,4 +248,7 @@ button:disabled { opacity: 0.5; cursor: progress; }
 @media (max-width: 900px) {
   .view { grid-template-columns: 1fr; grid-template-rows: 55vh auto; }
   .panel { border-left: 0; border-top: 1px solid var(--border); }
+}
+@media (max-width: 520px) {
+  .grid { grid-template-columns: 1fr; }
 }
