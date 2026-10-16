@@ -8,6 +8,7 @@ mod process;
 use process::{Process, command, free_port};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
+use std::os::unix::fs::PermissionsExt;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
@@ -80,6 +81,25 @@ fn browser_gateway_serves_live_views_and_streams_generation() {
             .status
             .success()
     );
+    // Keys are private, and running again never replaces them.
+    for key in ["server-key.pem", "client-key.pem"] {
+        let mode = std::fs::metadata(certs.join(key))
+            .unwrap()
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o777, 0o600, "{key}");
+    }
+    let ca = std::fs::read(certs.join("ca.pem")).unwrap();
+    let again = Command::new(env!("CARGO_BIN_EXE_mdma-certs"))
+        .arg(&certs)
+        .output()
+        .unwrap();
+    assert!(
+        !again.status.success()
+            && String::from_utf8_lossy(&again.stderr).contains("never replaces credentials"),
+        "{again:?}"
+    );
+    assert_eq!(std::fs::read(certs.join("ca.pem")).unwrap(), ca);
     let models = dir.path().join("models");
     std::fs::create_dir(&models).unwrap();
     std::fs::copy(model.path(), models.join("tiny.gguf")).unwrap();

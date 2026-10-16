@@ -5,7 +5,8 @@
 // Usage: mdma-certs [output-dir]  (defaults to ./certs)
 //        mdma-certs --spki <cert.pem>  prints the certificate's pin for MDMA_OPERATOR_SPKI
 //
-// Writes: ca.pem, server.pem, server-key.pem, client.pem, client-key.pem
+// Writes: ca.pem, server.pem, server-key.pem, client.pem, client-key.pem,
+// the keys readable by their owner only. Never replaces existing files.
 //
 // Env vars mdma-serve reads from this output:
 //   MDMA_TLS_CERT=<dir>/server.pem
@@ -17,12 +18,37 @@ use rcgen::{
     Issuer, KeyPair,
 };
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
-fn write_pair(dir: &Path, name: &str, cert_pem: &str, key_pem: &str) -> Result<(), BoxError> {
-    fs::write(dir.join(format!("{name}.pem")), cert_pem)?;
-    fs::write(dir.join(format!("{name}-key.pem")), key_pem)?;
+const FILES: [&str; 5] = [
+    "ca.pem",
+    "server.pem",
+    "server-key.pem",
+    "client.pem",
+    "client-key.pem",
+];
+
+/// Creates `path` holding `pem`; a `private` file is readable by its owner only.
+fn create(path: &Path, pem: &str, private: bool) -> Result<(), BoxError> {
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    if private {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options
+        .open(path)
+        .map_err(|e| format!("{}: {e}", path.display()))?;
+    file.write_all(pem.as_bytes())?;
+    file.sync_all()?;
     Ok(())
+}
+
+fn write_pair(dir: &Path, name: &str, cert_pem: &str, key_pem: &str) -> Result<(), BoxError> {
+    create(&dir.join(format!("{name}.pem")), cert_pem, false)?;
+    create(&dir.join(format!("{name}-key.pem")), key_pem, true)
 }
 
 fn ca_params() -> Result<CertificateParams, BoxError> {
@@ -66,11 +92,24 @@ fn main() -> Result<(), BoxError> {
         .nth(1)
         .map_or_else(|| PathBuf::from("certs"), PathBuf::from);
     fs::create_dir_all(&out_dir)?;
+    // Checked up front so a refusal writes nothing: servers and clients may
+    // still trust what is there.
+    if let Some(existing) = FILES
+        .iter()
+        .map(|name| out_dir.join(name))
+        .find(|path| fs::symlink_metadata(path).is_ok())
+    {
+        return Err(format!(
+            "{} exists; mdma-certs never replaces credentials, so name an empty directory",
+            existing.display()
+        )
+        .into());
+    }
 
     let ca_key = KeyPair::generate()?;
     let ca_params = ca_params()?;
     let ca_cert = ca_params.self_signed(&ca_key)?;
-    fs::write(out_dir.join("ca.pem"), ca_cert.pem())?;
+    create(&out_dir.join("ca.pem"), &ca_cert.pem(), false)?;
     let issuer = Issuer::from_params(&ca_params, &ca_key);
 
     let server_key = KeyPair::generate()?;
