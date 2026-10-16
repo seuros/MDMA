@@ -30,6 +30,8 @@ pub struct TensorDesc {
 pub struct GgufModel {
     pub(crate) file: File,
     source_stamp: crate::cache::Stamp,
+    /// A copy only this loader holds, read by [`GgufModel::from_private`].
+    private: bool,
     tensor_data_offset: u64,
     metadata: HashMap<String, Value>,
     tensors: HashMap<String, TensorDesc>,
@@ -41,10 +43,23 @@ impl GgufModel {
         Self::from_file(File::open(path)?)
     }
 
-    pub(crate) fn from_file(mut file: File) -> Result<Self> {
+    pub(crate) fn from_file(file: File) -> Result<Self> {
+        Self::read(file, false)
+    }
+
+    /// A copy no path reaches and only this loader holds, such as a frozen
+    /// artifact. Where the OS creates such a file under a name and unlinks it
+    /// (FreeBSD, macOS), the unlink may change its ctime later: on UFS soft
+    /// updates while it is being read. So only writes, which change its
+    /// length or mtime, count as changes.
+    pub(crate) fn from_private(file: File) -> Result<Self> {
+        Self::read(file, true)
+    }
+
+    fn read(mut file: File, private: bool) -> Result<Self> {
         let source_stamp = crate::cache::Stamp::read(&file.metadata()?)?;
         let content = Content::read(&mut file).map_err(|e| Error::Parse(e.to_string()))?;
-        source_stamp.check(file.metadata()?)?;
+        unchanged(&source_stamp, private, file.metadata()?)?;
 
         let tensors = content
             .tensor_infos
@@ -64,6 +79,7 @@ impl GgufModel {
         Ok(Self {
             file,
             source_stamp,
+            private,
             tensor_data_offset: content.tensor_data_offset,
             metadata: content.metadata,
             tensors,
@@ -76,7 +92,7 @@ impl GgufModel {
     }
 
     pub(crate) fn check_source_unchanged(&self) -> std::io::Result<()> {
-        self.source_stamp.check(self.source_metadata()?)
+        unchanged(&self.source_stamp, self.private, self.source_metadata()?)
     }
 
     pub fn metadata_str(&self, key: &str) -> Option<&str> {
@@ -313,6 +329,18 @@ pub(crate) fn heaviest<T: Ord>(sizes: impl IntoIterator<Item = (T, u64)>) -> Opt
         .into_iter()
         .max_by_key(|(_, bytes)| *bytes)
         .map(|(dtype, _)| dtype)
+}
+
+fn unchanged(
+    stamp: &crate::cache::Stamp,
+    private: bool,
+    metadata: std::fs::Metadata,
+) -> std::io::Result<()> {
+    if private {
+        stamp.check_payload(metadata)
+    } else {
+        stamp.check(metadata)
+    }
 }
 
 fn tensor_n_bytes(name: &str, dtype: GgmlDType, shape: &[usize]) -> Result<usize> {

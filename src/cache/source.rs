@@ -51,10 +51,12 @@ impl Stamp {
     )]
     pub fn check_payload(&self, metadata: Metadata) -> io::Result<()> {
         let now = Self::read(&metadata)?;
-        // Atomic replacement can unlink this still-open inode, changing ctime.
-        // Per-tensor SHA also detects writes that restore mtime.
+        // An unlink changes the still-open inode's ctime, not its bytes: an
+        // atomic replacement of a cache file, or the name a private copy was
+        // created under. Per-tensor SHA also detects cache writes that
+        // restore mtime.
         if self.len != now.len || self.modified != now.modified {
-            return Err(io::Error::other("model cache changed while reading"));
+            return Err(io::Error::other("model/cache changed while reading"));
         }
         Ok(())
     }

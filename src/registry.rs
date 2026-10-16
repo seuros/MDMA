@@ -704,7 +704,7 @@ impl<B: Backend> Registry<B> {
                             .map_err(|e| failed(&e))?;
                     same_artifact(slot, &id)?;
                     (
-                        GgufModel::from_file(frozen).map_err(|e| failed(&e))?,
+                        GgufModel::from_private(frozen).map_err(|e| failed(&e))?,
                         Some(id),
                     )
                 } else {
