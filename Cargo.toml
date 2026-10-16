@@ -140,6 +140,14 @@ large_futures = "allow"
 suspicious_operation_groupings = "allow"
 option_if_let_else = "allow"
 
+# Debug info for every dependency is most of target/debug. Line tables keep
+# file:line in backtraces for our own code.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
+
 [profile.release]
 lto = true
 codegen-units = 1

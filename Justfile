@@ -75,8 +75,8 @@ test *args:
 # Lint + check + clippy (no tests)
 qq: fmt check clippy
 
-# Full QA: qq + rust tests + web tests
-qa: qq test web-test
+# Full QA: qq + rust tests + web tests, then drop stale build artifacts
+qa: qq test web-test sweep
 
 # Fix clippy warnings automatically
 fix:
@@ -107,6 +107,11 @@ web-build: web-install
 # Full web cycle: deps, tests, bundle, then rebuild mdma-web
 web-all: web-install web-test web-build
     {{cargo}} build --bin mdma-web
+
+# Drop stale build artifacts Cargo never removes: old toolchains', and unused for 2 weeks (cargo install cargo-sweep)
+sweep:
+    cargo sweep --installed
+    cargo sweep --time 14
 
 # Remove build output and the repo-local temp root.
 clean:
