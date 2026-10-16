@@ -42,7 +42,7 @@ fn setup_with_budget(
         options,
     )
     .unwrap();
-    assert!(registry.preload().is_empty());
+    assert_eq!(registry.preload(), Vec::new());
     registry.capture_execution_profiles().unwrap();
     let executor: Arc<dyn super::super::admission::Executor> =
         Arc::new(super::super::admission::Native {

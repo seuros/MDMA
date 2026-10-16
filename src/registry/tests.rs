@@ -288,7 +288,7 @@ fn aliases_share_one_upload_and_tokenizer_until_the_last_use_drops() {
         &[file.path(), file.path(), file.path()],
         Options::new(16),
     );
-    assert!(registry.preload().is_empty());
+    assert_eq!(registry.preload(), Vec::new());
     let first = decoder(&registry, "m0");
     for name in ["m1", "m2"] {
         let alias = decoder(&registry, name);
@@ -324,7 +324,7 @@ fn symlinks_hardlinks_and_dotted_paths_share_the_open_file() {
         &[file.path(), &hardlink, &symlink, &dotted],
         Options::new(32),
     );
-    assert!(registry.preload().is_empty());
+    assert_eq!(registry.preload(), Vec::new());
     for name in ["m1", "m2", "m3"] {
         assert!(Arc::ptr_eq(
             &decoder(&registry, "m0").model,
@@ -352,7 +352,7 @@ fn copies_and_same_sized_different_weights_are_not_aliases() {
         &[first.path(), copy.path(), different.path()],
         Options::new(32),
     );
-    assert!(registry.preload().is_empty());
+    assert_eq!(registry.preload(), Vec::new());
     let first = decoder(&registry, "m0");
     for name in ["m1", "m2"] {
         assert!(!Arc::ptr_eq(&first.model, &decoder(&registry, name).model));
@@ -414,7 +414,7 @@ fn budget_charges_alias_weights_once_until_the_last_use() {
     let budget = NativeMemoryBudget::new(bytes);
     let backend = Arc::new(LoadBackend::default());
     let registry = registry(&backend, &[file.path(), file.path()], budgeted(&budget));
-    assert!(registry.preload().is_empty());
+    assert_eq!(registry.preload(), Vec::new());
     assert_eq!(budget.used(), bytes);
     assert_eq!(budget.used(), backend.live_bytes.load(SeqCst));
     let held = decoder(&registry, "m1").model;
@@ -676,7 +676,7 @@ fn frozen_aliases_keep_the_exact_digest_when_the_original_changes_during_upload(
         registry.artifact_id("").is_none(),
         "no identity before a load"
     );
-    assert!(registry.preload().is_empty());
+    assert_eq!(registry.preload(), Vec::new());
     assert_eq!(registry.artifact_id("").unwrap().as_str(), expected);
     assert_eq!(registry.artifact_id("m1"), registry.artifact_id("m0"));
     assert!(registry.artifact_id("missing").is_none());
@@ -973,7 +973,7 @@ fn hashing_names_models_before_they_load_with_the_digest_a_load_reports() {
         "hashing loads nothing"
     );
     let loaded = Registry::new(backend, models, None, frozen(32)).unwrap();
-    assert!(loaded.preload().is_empty());
+    assert_eq!(loaded.preload(), Vec::new());
     assert_eq!(
         ["m0", "m1", "laya"]
             .map(|name| loaded.artifact_id(name).unwrap())
@@ -981,7 +981,7 @@ fn hashing_names_models_before_they_load_with_the_digest_a_load_reports() {
         hashed
     );
     changes.mark_unchanged();
-    assert!(registry.preload().is_empty());
+    assert_eq!(registry.preload(), Vec::new());
     assert!(changes.has_changed().unwrap(), "Watch learns of loads");
     assert_eq!(registry.artifact_id("m0"), Some(hashed[0].clone()));
 }

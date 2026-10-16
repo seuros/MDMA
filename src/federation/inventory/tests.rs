@@ -24,7 +24,7 @@ pub(crate) fn native_service() -> MdmaService<CpuBackend> {
         options,
     )
     .unwrap();
-    assert!(registry.preload().is_empty());
+    assert_eq!(registry.preload(), Vec::new());
     assert_eq!(registry.capture_execution_profiles().unwrap(), 2);
     // The published inventory must refer to already loaded bytes, never reopen
     // the source after the fixture is destroyed on return.

@@ -233,7 +233,7 @@ fn laya_registry<B: crate::backend::Backend>(
         options,
     )
     .unwrap();
-    assert!(registry.preload().is_empty());
+    assert_eq!(registry.preload(), Vec::new());
     registry
 }
 

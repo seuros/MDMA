@@ -221,7 +221,7 @@ fn aliases_load_and_warm_once() {
         None,
         false,
     );
-    assert!(registry.preload().is_empty());
+    assert_eq!(registry.preload(), Vec::new());
     assert_eq!(backend.downloads.get(), 10);
     assert_eq!(*backend.factories.borrow(), [(20, 16), (20, 16)]);
 }

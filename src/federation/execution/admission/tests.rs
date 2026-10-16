@@ -336,6 +336,13 @@ async fn deadline_cancels_a_running_unpolled_backpressured_worker_but_keeps_resp
 async fn a_live_stream_cannot_outlive_its_current_tls_pin_window() {
     let (f, service, binding, message) = setup();
     grant(&f, Some("native"));
+    let mut stream = service.synthesize(request(message, &binding)).unwrap();
+    assert!(matches!(
+        stream.next().await.unwrap().unwrap().event,
+        Some(Event::Accepted(_))
+    ));
+    // Shortened while the stream runs. The trust write may take longer than
+    // the window on a loaded disk; the stream ends either way.
     let mut policy = f
         .store
         .snapshot()
@@ -349,12 +356,10 @@ async fn a_live_stream_cannot_outlive_its_current_tls_pin_window() {
         pin.window.valid_until_ms = until;
     }
     f.store.approve_policy(policy).unwrap();
-    let mut stream = service.synthesize(request(message, &binding)).unwrap();
-    assert!(matches!(
-        stream.next().await.unwrap().unwrap().event,
-        Some(Event::Accepted(_))
-    ));
-    tokio::time::sleep(Duration::from_millis(130)).await;
+    tokio::time::sleep(Duration::from_millis(
+        until.saturating_sub(utc_ms().unwrap()) + 30,
+    ))
+    .await;
     assert_eq!(
         stream.next().await.unwrap().unwrap_err().code(),
         Code::PermissionDenied

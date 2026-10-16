@@ -35,7 +35,7 @@ fn aliased() -> (
         },
     )
     .unwrap();
-    assert!(registry.preload().is_empty());
+    assert_eq!(registry.preload(), Vec::new());
     (
         MdmaService::new(registry, "cpu").with_memory_budget(budget.clone()),
         budget,

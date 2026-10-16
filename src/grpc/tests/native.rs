@@ -55,7 +55,7 @@ where
         },
     )
     .unwrap();
-    assert!(registry.preload().is_empty());
+    assert_eq!(registry.preload(), Vec::new());
     let weights = budget.used();
     assert!(weights > 0);
     let fixture = Fixture::new();
