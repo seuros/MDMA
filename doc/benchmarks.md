@@ -102,6 +102,19 @@ revision `5ca4d44`, the modes measured:
 | packed Q8_K (`MDMA_CPU_Q4K_VEC_DOT=1`) | 3.568 ± 0.006 | 2.867 ± 0.003 | opt-in; can change logits |
 | direct f32 SIMD (`MDMA_CPU_Q4K_F32_DOT=1`) | 2.992 ± 0.004 | 2.483 ± 0.005 | opt-in; max dot drift `2.8e-6` in the fixture |
 
+After the fused Q4_K kernel and runtime ISA selection landed, the same host
+measured the current paths at revision `b3e6fa8`:
+
+| CPU mode | Prefill tok/s | Decode tok/s | Accuracy status |
+| --- | ---: | ---: | --- |
+| exact, fused Q4_K (`x86-64-v3`) | 3.051 ± 0.167 | 2.585 ± 0.175 | bit-identical to the dequantized reference |
+| packed (`MDMA_CPU_MATMUL=packed`) | 10.173 ± 1.922 | 8.894 ± 1.411 | opt-in; can change logits |
+
+These runs used the same Qwen3.5-9B Q4_K_M file, 24 pinned Rayon threads,
+native release code, a 128-token prompt, 16 decode steps, one warmup, and
+three timed trials. The exact path now provides the accuracy-preserving
+baseline; the packed path remains the throughput option.
+
 ## x86_64 16-thread CPU report
 
 Collected on 2026-10-16 on a 16-thread x86_64 FreeBSD 16-CURRENT host with
