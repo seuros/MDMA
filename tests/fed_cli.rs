@@ -600,8 +600,8 @@ fn a_serving_origin_imports_routes_without_a_restart() {
             &origin,
             &certs,
             &[
+                // No MDMA_RPC_TIMEOUT_MS: a route gets the most it may run.
                 ("MDMA_MODEL", "executor-other"),
-                ("MDMA_RPC_TIMEOUT_MS", "60000"),
                 ("MDMA_MAX_TOKENS", "4"),
                 ("MDMA_READY_TIMEOUT_SECS", "30"),
             ],

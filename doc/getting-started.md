@@ -297,19 +297,19 @@ export MDMA_TLS_CERT=certs/client.pem MDMA_TLS_KEY=certs/client-key.pem MDMA_TLS
 MDMA_MODEL=gemma-4-E2B-it-Q4_K_M mdma-client "Why is the sky blue? Answer in two sentences."
 
 # the Linux machine's model
-MDMA_MODEL=linux-Qwen3.5-9B-Q4_K_M MDMA_RPC_TIMEOUT_MS=300000 MDMA_MAX_TOKENS=300 \
+MDMA_MODEL=linux-Qwen3.5-9B-Q4_K_M MDMA_MAX_TOKENS=300 \
   mdma-client "Why is the sky blue? Answer in two sentences."
 
 # the FreeBSD machine's model
-MDMA_MODEL=freebsd-gemma-4-E4B-it-Q4_K_M MDMA_RPC_TIMEOUT_MS=300000 MDMA_MAX_TOKENS=120 \
+MDMA_MODEL=freebsd-gemma-4-E4B-it-Q4_K_M MDMA_MAX_TOKENS=120 \
   mdma-client "Why is the sky blue? Answer in two sentences."
 ```
 
 The routed models get the same chat formatting as the Mac's own: the Mac wraps
 the question in the format each machine's signed catalog names, then forwards
-it. A routed call needs a deadline (`MDMA_RPC_TIMEOUT_MS`, at most five
-minutes). Qwen3.5 reasons before it answers and prints that block first, here
-empty:
+it. A routed call runs for at most five minutes; `mdma-client` asks for that
+unless `MDMA_RPC_TIMEOUT_MS` sets less. Qwen3.5 reasons before it answers and
+prints that block first, here empty:
 
 ```text
 <think>

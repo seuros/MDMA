@@ -47,8 +47,6 @@ use upstream::Upstream;
 const SCENE_JS: &str = include_str!("mdma-web/assets/scene.js");
 const STYLE_CSS: &str = include_str!("mdma-web/assets/style.css");
 const SHUTDOWN_LIMIT: Duration = Duration::from_secs(10);
-/// Federated routes need a deadline; generations need their time.
-const DEFAULT_RPC_TIMEOUT: Duration = Duration::from_secs(300);
 
 #[derive(serde::Deserialize)]
 struct ViewPath {
@@ -77,7 +75,7 @@ async fn serve(config: Config, guard: ShutdownGuard) -> Result<(), BoxError> {
         config.tls_key.as_ref(),
         config.tls_ca.as_ref(),
     )?;
-    let rpc_timeout = deadline::timeout(|name| std::env::var(name))?.or(Some(DEFAULT_RPC_TIMEOUT));
+    let rpc_timeout = deadline::timeout(|name| std::env::var(name))?.or(Some(deadline::MAX));
     let executor = Executor::graceful(guard.clone());
     let listener = TcpListener::bind_address(config.listen.to_string(), executor.clone()).await?;
     let bound = listener.local_addr()?;

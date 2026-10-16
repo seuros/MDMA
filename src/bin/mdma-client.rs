@@ -9,7 +9,7 @@
 //   MDMA_GREEDY                    1 requests greedy decoding without repetition penalties; default 0
 //   MDMA_CHAT                      1 sends the prompt as one user turn in the model's chat format; default 0
 //   MDMA_SYSTEM                    with MDMA_CHAT=1, a system message before that turn
-//   MDMA_RPC_TIMEOUT_MS            optional 1..300000; required for federation routes
+//   MDMA_RPC_TIMEOUT_MS            optional 1..300000; a routed model defaults to 300000, the most a route runs
 // Usage: mdma-client [prompt words...]
 //        mdma-client --decide request.json   ({"state": ..., "questions": {...}} to a Laya model)
 //        mdma-client --push PEER FILE [MODEL] (FILE.gguf from the server's models folder to a
@@ -157,6 +157,16 @@ async fn main() -> Result<(), BoxError> {
         ready_timeout,
     )
     .await?;
+    let target = if model.is_empty() {
+        &h.default_model
+    } else {
+        &model
+    };
+    let routed = h
+        .models
+        .iter()
+        .any(|m| &m.name == target && m.host.is_some());
+    let rpc_timeout = rpc_timeout.or_else(|| routed.then_some(deadline::MAX));
 
     if let Some(request) = decision {
         let reply = client

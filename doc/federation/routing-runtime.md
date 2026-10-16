@@ -74,8 +74,8 @@ credential lifetimes. It never resets the received deadline or redispatches
 after a failure, even before `Accepted`. Failed transport outcomes are ambiguous.
 
 The `mdma-client` binary accepts `MDMA_RPC_TIMEOUT_MS=30000` (1..300000) for both
-workload operations. Set it together with `MDMA_MODEL=<approved-alias>` for
-routing. Leaving it unset preserves ordinary local calls without a deadline.
+workload operations. Unset, a call to a routed alias gets 300000, the most a
+route runs, and ordinary local calls keep running without a deadline.
 
 A routed `chat` request (`MDMA_CHAT=1`, optionally `MDMA_SYSTEM`) is wrapped
 on the origin, in the chat format the executor's fresh signed catalog

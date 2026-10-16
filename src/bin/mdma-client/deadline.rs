@@ -1,6 +1,10 @@
 use rama::{error::BoxError, http::grpc::Request};
 use std::{env::VarError, time::Duration};
 
+/// The longest deadline a call may ask for, and the most a route runs: what
+/// a routed call gets when MDMA_RPC_TIMEOUT_MS is unset.
+pub(super) const MAX: Duration = Duration::from_mins(5);
+
 pub(super) fn timeout(
     env: impl FnOnce(&str) -> Result<String, VarError>,
 ) -> Result<Option<Duration>, BoxError> {
