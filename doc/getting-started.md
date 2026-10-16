@@ -368,7 +368,8 @@ in the Mac's budget.
   --push`. See
   [pushing models](federation/routing-runtime.md#pushing-models-to-a-peer).
 - **Certificates expire** after 30 days by default (`mdma-fed init --days`, up
-  to 397). Renewing is a new `init` and enrolling again.
+  to 397). Renewing is a new `init`, then `mdma-fed enroll --replace` of the
+  new bundle on each peer.
 - **macOS services**: Local Network privacy remembers its answer per signed
   binary, and a program started from another app counts as that app. To run
   `mdma-serve` under launchd, sign it with an Apple-issued identity; see the

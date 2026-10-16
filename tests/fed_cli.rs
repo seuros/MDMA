@@ -282,8 +282,8 @@ fn an_origin_routes_an_executors_model_set_up_with_mdma_fed() {
     let executor_log = root.path().join("executor.log");
     let running = executor.serve(&certs, &executor_log);
     // The executor lists its model once it has hashed it.
-    let routes = eventually("routes", &executor_log, || routes(&origin, &certs));
-    assert_eq!(routes.trim(), "executor-tiny -> executor.fleet.test tiny");
+    let routed = eventually("routes", &executor_log, || routes(&origin, &certs));
+    assert_eq!(routed.trim(), "executor-tiny -> executor.fleet.test tiny");
     let status = ok(&fed(&["status", path(&origin.dir)]));
     assert!(
         status.contains(
@@ -313,14 +313,41 @@ fn an_origin_routes_an_executors_model_set_up_with_mdma_fed() {
             && shown.contains("runs     tiny (synthesize)"),
         "{shown}"
     );
-    let refused = fed(&["export", path(&executor.dir)]);
-    assert!(
-        !refused.status.success()
-            && String::from_utf8_lossy(&refused.stderr).contains("stop mdma-serve first")
+    refused(
+        &fed(&["export", path(&executor.dir)]),
+        "stop mdma-serve first",
     );
+    drop(running);
+
+    // Renewing: the origin runs init again under its id. The executor keeps
+    // the old credentials until told to replace them, then serves it again.
+    std::fs::remove_dir_all(&origin.dir).unwrap();
+    std::fs::remove_dir_all(&origin.models).unwrap();
+    let origin = Node::new(root.path(), "origin", Some(model.path()));
+    let grants = ["--execute", "all", "--models", path(&executor.models)];
+    let bundle = root.path().join("origin.json");
+    refused(
+        &fed(&[
+            &["enroll", path(&executor.dir), path(&bundle)][..],
+            &grants[..],
+        ]
+        .concat()),
+        "enroll --replace if it ran init again",
+    );
+    executor.enroll(
+        root.path(),
+        "origin",
+        &[&grants[..], &["--replace"][..]].concat(),
+    );
+    origin.trust(root.path(), "executor");
+    let running = executor.serve(&certs, &executor_log);
+    let routed = eventually("routes after renewal", &executor_log, || {
+        routes(&origin, &certs)
+    });
+    assert_eq!(routed.trim(), "executor-tiny -> executor.fleet.test tiny");
+    drop(running);
 
     // Only a node that routes may start without local models.
-    drop(running);
     let empty = root.path().join("empty-models");
     std::fs::create_dir(&empty).unwrap();
     let mut plain = command(env!("CARGO_BIN_EXE_mdma-serve"))

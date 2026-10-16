@@ -150,9 +150,9 @@ mdma-fed export /var/lib/mdma/fed > pathfinder.json
 `init` makes a root and identity certificate (the id is the DNS name and
 identity URI), a catalog signer, the trust store and `runtime.toml`, valid for
 `--days` (30 by default, at most 397). The root's key is not kept: renewing is
-a new `init` and enrolling again. `export` prints the public bundle and, on
-stderr, its digest; `enroll` prints the digest it read, so the two can be
-compared over another channel.
+a new `init` and enrolling the new bundle with `--replace` on each peer.
+`export` prints the public bundle and, on stderr, its digest; `enroll` prints
+the digest it read, so the two can be compared over another channel.
 
 On each side, enroll the other's bundle:
 
@@ -165,8 +165,11 @@ mdma-fed enroll ~/.mdma/fed pathfinder.json --endpoint https://192.168.3.41:6365
 
 `--catalog` and `--execute` take `all` or a comma list; the catalog defaults
 to what the peer may run. Enrolling the same bundle again replaces its grants;
-a known peer with other credentials is refused. Execute grants turn on
-`enable_execution`.
+a known peer with other credentials is refused unless `--replace` is given:
+its old credentials are then suspended and the new bundle staged with the
+grants given. Routes imported from the old identity are dropped, so run
+`mdma-fed routes` again on that side; keys the trust store retired or revoked
+stay refused. Execute grants turn on `enable_execution`.
 
 Start the executor with `MDMA_FEDERATION_CONFIG=<dir>/runtime.toml`. Then, with
 the origin stopped:

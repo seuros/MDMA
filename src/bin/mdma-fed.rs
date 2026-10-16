@@ -80,6 +80,9 @@ struct Enroll {
     /// The models folder; defaults to MDMA_MODELS_DIR.
     #[usage(long, value_hint = usage_rs::ValueHint::DirPath)]
     models: Option<PathBuf>,
+    /// The peer ran init again: suspend its old credentials and trust these.
+    #[usage(long)]
+    replace: bool,
 }
 
 #[derive(Debug, usage_rs::Args)]
@@ -257,7 +260,12 @@ fn run(command: Command) -> Result<()> {
         Command::Enroll(args) => {
             let (bundle, digest) = read_bundle(&args.bundle)?;
             let grants = grants(&args)?;
-            let peer = admin::enroll(&args.dir, &bundle, args.endpoint.as_deref(), grants)?;
+            let enroll = if args.replace {
+                admin::reenroll
+            } else {
+                admin::enroll
+            };
+            let peer = enroll(&args.dir, &bundle, args.endpoint.as_deref(), grants)?;
             println!(
                 "enrolled {} at {} from bundle {digest}",
                 peer.server_id, peer.endpoint

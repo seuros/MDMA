@@ -170,6 +170,12 @@ fn save(dir: &Path, config: &Config) -> Result<(), BoxError> {
 
 /// Replaces `path` whole, through a sibling `.next` file.
 pub(crate) fn save_config(path: &Path, config: &Config) -> Result<(), BoxError> {
+    replace(path, toml::to_string(config)?)
+}
+
+/// Writes `bytes` as the private file `path`, whole, through a sibling
+/// `.next` file.
+fn replace(path: &Path, bytes: impl AsRef<[u8]>) -> Result<(), BoxError> {
     let mut next = path.as_os_str().to_os_string();
     next.push(".next");
     let next = PathBuf::from(next);
@@ -178,7 +184,7 @@ pub(crate) fn save_config(path: &Path, config: &Config) -> Result<(), BoxError> 
         Err(error) if error.kind() != std::io::ErrorKind::NotFound => return Err(error.into()),
         _ => {}
     }
-    secret(&next, toml::to_string(config)?)?;
+    secret(&next, bytes)?;
     std::fs::rename(&next, path)?;
     Ok(())
 }
@@ -339,6 +345,29 @@ pub fn enroll(
     endpoint: Option<&str>,
     grants: Grants,
 ) -> Result<config::Peer, BoxError> {
+    admit(dir, bundle, endpoint, grants, false)
+}
+
+/// [`enroll`], for a peer that ran `init` again: its old credentials are
+/// suspended and the bundle's staged in their place, with `grants`. Routes
+/// imported from the old identity are dropped; keys the store retired or
+/// revoked stay refused.
+pub fn reenroll(
+    dir: &Path,
+    bundle: &Bundle,
+    endpoint: Option<&str>,
+    grants: Grants,
+) -> Result<config::Peer, BoxError> {
+    admit(dir, bundle, endpoint, grants, true)
+}
+
+fn admit(
+    dir: &Path,
+    bundle: &Bundle,
+    endpoint: Option<&str>,
+    grants: Grants,
+    replace_credentials: bool,
+) -> Result<config::Peer, BoxError> {
     let (dir, mut config) = load(dir)?;
     if bundle.format != BUNDLE_FORMAT {
         return Err(format!("not a {BUNDLE_FORMAT} bundle").into());
@@ -363,53 +392,69 @@ pub fn enroll(
         private_dir(&roots)?;
     }
     root.path = roots.join(format!("{}.pem", peer.server_id));
-    match std::fs::read(&root.path) {
-        Ok(on_file) if on_file != bundle.root_pem.as_bytes() => {
-            return Err(format!(
-                "{} holds another root for {}",
-                root.path.display(),
-                peer.server_id
-            )
-            .into());
-        }
-        Ok(_) => {}
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            secret(&root.path, &bundle.root_pem)?;
-        }
+    let root_path = root.path.clone();
+    let on_file = match std::fs::read(&root_path) {
+        Ok(on_file) => Some(on_file),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
         Err(error) => return Err(error.into()),
+    };
+    let new_root = on_file.as_deref() != Some(bundle.root_pem.as_bytes());
+    if new_root && on_file.is_some() && !replace_credentials {
+        return Err(format!(
+            "{} holds another root for {}; enroll --replace if it ran init again",
+            root_path.display(),
+            peer.server_id
+        )
+        .into());
     }
     if let Some(endpoint) = endpoint {
         peer.endpoint = endpoint.into();
     }
     peer.validate()?;
     let store = open_store(&config)?;
-    match store.snapshot()?.peer(&peer.server_id) {
-        None => {
-            store.stage(peer.clone())?;
-            store.activate_control(
-                &peer.server_id,
-                ControlPermissions {
-                    identify: true,
-                    scan_capabilities: true,
-                },
-            )?;
+    let control = ControlPermissions {
+        identify: true,
+        scan_capabilities: true,
+    };
+    let stage = match store.snapshot()?.peer(&peer.server_id) {
+        None => true,
+        Some(record)
+            if same_credentials(&record.policy, &peer) && record.state == State::Active =>
+        {
+            peer.route_imports.clone_from(&record.policy.route_imports);
+            false
+        }
+        Some(record) if replace_credentials => {
+            if record.state == State::Active {
+                store.suspend(&peer.server_id)?;
+            }
+            true
         }
         Some(record) if !same_credentials(&record.policy, &peer) => {
-            return Err(format!("{} is enrolled with other credentials", peer.server_id).into());
+            return Err(format!(
+                "{} is enrolled with other credentials; enroll --replace if it ran init again",
+                peer.server_id
+            )
+            .into());
         }
-        Some(record) if record.state != State::Active => {
+        Some(record) => {
             return Err(format!(
                 "{} is {:?}; it cannot be granted anything",
                 peer.server_id, record.state
             )
             .into());
         }
-        Some(record) => peer.route_imports.clone_from(&record.policy.route_imports),
-    }
-    peer.control_permissions = ControlPermissions {
-        identify: true,
-        scan_capabilities: true,
     };
+    if stage {
+        store.stage(peer.clone())?;
+        store.activate_control(&peer.server_id, control.clone())?;
+    }
+    // Written once the store took the bundle: a root the store refused never
+    // replaces the one on file.
+    if new_root {
+        replace(&root_path, &bundle.root_pem)?;
+    }
+    peer.control_permissions = control;
     peer.catalog_exports = grants.catalog;
     peer.execute_exports = grants.execute;
     peer.install = grants.install;
