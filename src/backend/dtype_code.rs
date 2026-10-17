@@ -37,6 +37,7 @@ pub fn decoder_code(dtype: GgmlDType) -> Result<i32> {
     match dtype {
         GgmlDType::BF16 => Ok(BF16),
         GgmlDType::Q5K => Ok(Q5K),
+        GgmlDType::Q8_0 => Ok(Q8_0),
         _ => code(dtype),
     }
 }

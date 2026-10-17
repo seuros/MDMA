@@ -71,6 +71,8 @@ On CUDA, `MDMA_CUDA_INT8` picks the K-quant int8 paths: `prefill`
 (default, the int8 GEMM from 2 tokens up on sm_80+), `all` (plus the
 dp4a decode matvec) or `off` (f32 activations only). CUDA decode replays
 a captured graph per token; `MDMA_CUDA_GRAPHS=0` uses the eager path.
+Qwen3.5's recurrent state is included in the captured graph and its Q8_0
+alpha/beta projections use a dedicated matvec kernel.
 
 For Vulkan, `MDMA_VK_F16_WEIGHTS=1` stages prefill weights as f16; anything
 else keeps f32. `VulkanBackend::calibrate_f16` measures speed and logit drift

@@ -39,6 +39,7 @@ fn decoder_formats_do_not_change_legacy_capabilities() {
     for (dtype, tag, quant, size) in [
         (GgmlDType::BF16, 4, false, 0),
         (GgmlDType::Q5K, 5, true, 176),
+        (GgmlDType::Q8_0, 6, false, 0),
     ] {
         assert!(code(dtype).is_err());
         assert_eq!(decoder_code(dtype).unwrap(), tag);

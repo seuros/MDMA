@@ -3,7 +3,7 @@
 // shapes for the warp-per-row kernels). A transposed index
 // or a swapped nibble does not survive these shapes.
 use super::CudaBackend;
-use crate::backend::cpu::CpuBackend;
+use crate::backend::cpu::{CpuBackend, CpuBuf};
 use crate::backend::test_support::fixture;
 use crate::backend::test_support::{
     activation_row, bytes, close, cpu_qmatmul, f16_round, f32s, qmatmul as gpu_qmatmul,
@@ -13,7 +13,7 @@ use crate::backend::test_support::{
     generation::{benchmark_prefix, greedy_continuation},
     parity,
 };
-use crate::backend::{AttnSpec, Backend, KvView, Pool, QWeight, RopeSpec};
+use crate::backend::{AttnSpec, Backend, DeltaInputs, DeltaSpec, KvView, Pool, QWeight, RopeSpec};
 use crate::gguf::{GgmlDType, GgufModel};
 
 fn gpu() -> CudaBackend {
@@ -99,6 +99,159 @@ fn download_all(gpu: &CudaBackend, b: &super::CudaBuf) -> Vec<u8> {
     let mut out = vec![0u8; b.len];
     gpu.download(b, 0, &mut out).unwrap();
     out
+}
+
+#[test]
+fn qwen35_partial_rope_matches_cpu() {
+    let gpu = gpu();
+    let cpu = CpuBackend;
+    let spec = RopeSpec {
+        head_dim: 32,
+        theta: 10_000.0,
+    };
+    let values: Vec<f32> = (0..3 * spec.head_dim)
+        .map(|i| ((i * 19 % 97) as f32 - 48.0) / 17.0)
+        .collect();
+    let mut want = CpuBuf(bytes(&values));
+    cpu.rope_partial_split_half(&mut want, 7, &spec, 24)
+        .unwrap();
+    let mut got = upload_new(&gpu, &values);
+    gpu.rope_partial_split_half(&mut got, 7, &spec, 24).unwrap();
+    close(&f32s(&download_all(&gpu, &got)), &f32s(&want.0), 2e-5);
+}
+
+#[test]
+fn qwen35_sigmoid_gate_matches_cpu() {
+    let gpu = gpu();
+    let cpu = CpuBackend;
+    let gate: Vec<f32> = (0..257).map(|i| (i as f32 - 128.0) / 31.0).collect();
+    let x: Vec<f32> = (0..257)
+        .map(|i| ((i * 23 % 101) as f32 - 50.0) / 19.0)
+        .collect();
+    let (gate_cpu, x_cpu) = (CpuBuf(bytes(&gate)), CpuBuf(bytes(&x)));
+    let mut want = CpuBuf(bytes(&vec![0.0f32; gate.len()]));
+    cpu.sigmoid_mul(&gate_cpu, &x_cpu, &mut want).unwrap();
+    let (gate_gpu, x_gpu) = (upload_new(&gpu, &gate), upload_new(&gpu, &x));
+    let mut got = gpu.alloc(gate.len() * 4, Pool::Scratch).unwrap();
+    gpu.sigmoid_mul(&gate_gpu, &x_gpu, &mut got).unwrap();
+    close(&f32s(&download_all(&gpu, &got)), &f32s(&want.0), 2e-5);
+}
+
+#[test]
+fn qwen35_ssm_conv_silu_matches_cpu_and_updates_state() {
+    let gpu = gpu();
+    let cpu = CpuBackend;
+    let (channels, taps) = (257usize, 4usize);
+    let weights: Vec<f32> = (0..channels * taps)
+        .map(|i| ((i * 11 % 37) as f32 - 18.0) / 29.0)
+        .collect();
+    let initial: Vec<f32> = (0..channels * (taps - 1))
+        .map(|i| ((i * 7 % 31) as f32 - 15.0) / 41.0)
+        .collect();
+    let mut state_cpu = CpuBuf(bytes(&initial));
+    let weights_cpu = CpuBuf(bytes(&weights));
+    let mut state_gpu = upload_new(&gpu, &initial);
+    let weights_gpu = upload_new(&gpu, &weights);
+    for step in 0..2 {
+        let x: Vec<f32> = (0..channels)
+            .map(|i| ((i * 13 + step * 17) % 47) as f32 / 23.0 - 1.0)
+            .collect();
+        let x_cpu = CpuBuf(bytes(&x));
+        let mut want = CpuBuf(bytes(&vec![0.0f32; channels]));
+        let x_gpu = upload_new(&gpu, &x);
+        let mut got = gpu.alloc(channels * 4, Pool::Scratch).unwrap();
+        cpu.ssm_conv_silu(&weights_cpu, &mut state_cpu, &x_cpu, &mut want)
+            .unwrap();
+        gpu.ssm_conv_silu(&weights_gpu, &mut state_gpu, &x_gpu, &mut got)
+            .unwrap();
+        close(&f32s(&download_all(&gpu, &got)), &f32s(&want.0), 2e-5);
+        close(
+            &f32s(&download_all(&gpu, &state_gpu)),
+            &f32s(&state_cpu.0),
+            2e-5,
+        );
+    }
+}
+
+#[test]
+fn qwen35_gated_delta_matches_cpu_and_updates_state() {
+    let gpu = gpu();
+    let cpu = CpuBackend;
+    let spec = DeltaSpec {
+        n_k_heads: 2,
+        n_v_heads: 4,
+        head_dim: 32,
+        eps: 1e-5,
+    };
+    let qkv_len = (2 * spec.n_k_heads + spec.n_v_heads) * spec.head_dim;
+    let qkv0: Vec<f32> = (0..qkv_len)
+        .map(|i| ((i * 17 % 113) as f32 - 56.0) / 89.0)
+        .collect();
+    let qkv1: Vec<f32> = (0..qkv_len)
+        .map(|i| ((i * 29 % 127) as f32 - 63.0) / 97.0)
+        .collect();
+    let alpha: Vec<f32> = (0..spec.n_v_heads)
+        .map(|i| (i as f32 - 1.5) / 7.0)
+        .collect();
+    let beta: Vec<f32> = (0..spec.n_v_heads)
+        .map(|i| (i as f32 - 1.0) / 5.0)
+        .collect();
+    let dt_bias: Vec<f32> = (0..spec.n_v_heads)
+        .map(|i| (i as f32 - 2.0) / 9.0)
+        .collect();
+    let a: Vec<f32> = (0..spec.n_v_heads)
+        .map(|i| -(i as f32 + 1.0) / 11.0)
+        .collect();
+    let state_len = spec.n_v_heads * spec.head_dim * spec.head_dim;
+    let initial: Vec<f32> = (0..state_len)
+        .map(|i| ((i * 5 % 43) as f32 - 21.0) / 500.0)
+        .collect();
+    let (mut state_cpu, state_gpu) = (CpuBuf(bytes(&initial)), upload_new(&gpu, &initial));
+    let (alpha_cpu, beta_cpu, dt_cpu, a_cpu) = (
+        CpuBuf(bytes(&alpha)),
+        CpuBuf(bytes(&beta)),
+        CpuBuf(bytes(&dt_bias)),
+        CpuBuf(bytes(&a)),
+    );
+    let (alpha_gpu, beta_gpu, dt_gpu, a_gpu) = (
+        upload_new(&gpu, &alpha),
+        upload_new(&gpu, &beta),
+        upload_new(&gpu, &dt_bias),
+        upload_new(&gpu, &a),
+    );
+    let mut state_gpu = state_gpu;
+    for qkv_values in [&qkv0, &qkv1] {
+        let qkv_cpu = CpuBuf(bytes(qkv_values));
+        let qkv_gpu = upload_new(&gpu, qkv_values);
+        let inputs_cpu = DeltaInputs {
+            qkv: &qkv_cpu,
+            alpha: &alpha_cpu,
+            beta: &beta_cpu,
+            dt_bias: &dt_cpu,
+            a: &a_cpu,
+        };
+        let inputs_gpu = DeltaInputs {
+            qkv: &qkv_gpu,
+            alpha: &alpha_gpu,
+            beta: &beta_gpu,
+            dt_bias: &dt_gpu,
+            a: &a_gpu,
+        };
+        let mut want = CpuBuf(bytes(&vec![0.0f32; spec.n_v_heads * spec.head_dim]));
+        let mut got = gpu
+            .alloc(spec.n_v_heads * spec.head_dim * 4, Pool::Scratch)
+            .unwrap();
+        cpu.gated_delta_step(&spec, &inputs_cpu, &mut state_cpu, &mut want)
+            .unwrap();
+        gpu.gated_delta_step(&spec, &inputs_gpu, &mut state_gpu, &mut got)
+            .unwrap();
+        close(&f32s(&download_all(&gpu, &got)), &f32s(&want.0), 2e-3);
+        close(
+            &f32s(&download_all(&gpu, &state_gpu)),
+            &f32s(&state_cpu.0),
+            2e-3,
+        );
+    }
 }
 
 /// The fused kernel is add_f32 then rmsnorm_f32 in one launch, with the
@@ -390,6 +543,20 @@ fn synthetic_kquant(dtype: GgmlDType, n_out: usize, n_in: usize) -> Vec<u8> {
     w
 }
 
+fn synthetic_q8_0(n_out: usize, n_in: usize) -> Vec<u8> {
+    assert!(n_in.is_multiple_of(32));
+    let block_bytes = 34;
+    let blocks = n_out * n_in / 32;
+    let mut w = vec![0u8; blocks * block_bytes];
+    for (block, bytes) in w.chunks_exact_mut(block_bytes).enumerate() {
+        set_f16(bytes, 0, 0.125 + 0.01 * (block % 5) as f32);
+        for (i, q) in bytes[2..].iter_mut().enumerate() {
+            *q = (i as i8).wrapping_mul(3).wrapping_sub(45).cast_unsigned();
+        }
+    }
+    w
+}
+
 // 37 rows: not a multiple of the 4-warp block. n_in 768: three blocks per
 // row, so a lane-to-element mapping error cannot hide in a single block.
 fn kquant_matches_cpu(dtype: GgmlDType) {
@@ -409,6 +576,16 @@ fn qmatmul_matches_cpu_on_synthetic_q4k_blocks() {
 #[test]
 fn qmatmul_matches_cpu_on_synthetic_q6k_blocks() {
     kquant_matches_cpu(GgmlDType::Q6K);
+}
+
+#[test]
+fn qmatmul_matches_cpu_on_synthetic_q8_0_blocks() {
+    let (n_out, n_in) = (37, 160);
+    let w = synthetic_q8_0(n_out, n_in);
+    let x: Vec<f32> = (0..n_in)
+        .map(|i| ((i * 29 % 101) as f32 - 50.0) / 64.0)
+        .collect();
+    run_qmatmul(GgmlDType::Q8_0, &w, &[n_out, n_in], &x, 1e-5);
 }
 
 /// x as the GEMMs see it: Q8_1 blocks of 32, d rounded to f16, q =
@@ -579,6 +756,7 @@ fn embed_matches_cpu_on_synthetic_kquant_tables() {
     for dtype in [GgmlDType::Q4K, GgmlDType::Q6K] {
         embed_matches_cpu(dtype, &synthetic_kquant(dtype, 5, 512), 5, 512);
     }
+    embed_matches_cpu(GgmlDType::Q8_0, &synthetic_q8_0(5, 512), 5, 512);
 }
 
 #[test]

@@ -249,6 +249,13 @@ impl<B: Backend> KvCache<B> {
         self.len = len;
         if len == 0 {
             self.written = 0;
+        } else if !self.states.is_empty() {
+            // Graph replay updates recurrent device state without going
+            // through the ordinary layer writes, so keep the host cursor in
+            // step with the replayed position.  Capture records ordinary
+            // writes on the host while its kernels do not execute; assigning
+            // here also restores the cursor to the captured prefix.
+            self.written = len;
         }
     }
 

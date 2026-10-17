@@ -88,7 +88,7 @@ The compute and memory planes are hand-rolled on purpose; everything else
 | ROCm / HIP | `rocm` | AMD RDNA4 (`gfx1201` by default), ROCm 7.2 | production path; packed int8 GEMV, fused FFN, int8 WMMA GEMM, WMMA flash attention |
 | Level Zero | `level0` | Intel Xe iGPU (`mtl` by default) | elementwise, RoPE, attention, f32/f16 and Q4_K/Q6_K matvec; tested against the CPU backend |
 | Vulkan | `vulkan` | Vulkan 1.2 GPU with buffer-device-address + int64, including AMD APUs and pre-RDNA3 parts via RADV | f32 math, device-local buffers, wave-cooperative matvec and attention, LDS-tiled prefill GEMM; optional f16 staging selected by load-time speed and logit-drift checks (`MDMA_VK_F16_WEIGHTS=auto\|1\|0`) |
-| CUDA | `cuda` | NVIDIA through the driver API (Ampere `sm_86` by default) | vectorized K-quant matvec (4 rows per warp), key-split attention; kernels compiled to PTX by clang, no CUDA toolkit |
+| CUDA | `cuda` | NVIDIA through the driver API (Ampere `sm_86` by default; validated on Ada `sm_89`) | vectorized K-quant matvec (4 rows per warp), Q8_0 matvec, key-split attention and CUDA graph decode; kernels compiled to PTX by clang, no CUDA toolkit |
 | Metal | `metal` | Apple silicon (unified memory), macOS 12+ | request-owned decode batching, f32 tiled prefill, fused FFN/residual-norm, online causal attention; F32/F16/BF16 and Q4_K/Q5_K/Q6_K weights, f32 KV |
 | Coral Edge TPU | `coral` | PCIe/M.2 Coral on FreeBSD and Linux (`apex`/`gasket` drivers); USB Coral detected only | Llama decode matmuls on the chip (per-tile uint8 scales, CPU recompute of clamped outputs), attention, norms and an int8 classifier on the CPU; `MDMA_CORAL_MODE=model` runs all of TinyStories-15M's layers in one program per token with a uint8 KV cache; ~7 MB of weights on chip |
 
@@ -103,7 +103,7 @@ weights. Unsupported architectures are rejected, not approximated.
 | `llama`, `internlm2` | Bespoke-MiniCheck-7B, TinyLlama 1.1B Chat | all |
 | `gemma4` (text only) | Gemma 4 E2B IT | CPU, Metal, ROCm, Vulkan, CUDA |
 | `qwen2`, `qwen3`, `qwen2vl` (text only) | NuMarkdown-8B; Qwen3-8B still open | CPU, ROCm |
-| `qwen35` (text only) | Qwen3.5-9B | CPU |
+| `qwen35` (text only) | Qwen3.5-9B | CPU, CUDA |
 | `glm4` | GLM-4-32B-0414 | CPU, ROCm |
 
 Bespoke-MiniCheck answers `Decide`: a document and claims in, the probability

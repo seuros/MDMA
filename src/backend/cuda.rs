@@ -6,7 +6,8 @@
 // runs on a backend twin with its own stream.
 
 use super::{
-    AttnSpec, Backend, Error, KvView, Operation, Pool, QWeight, Result, RopeSpec, dtype_code, shape,
+    AttnSpec, Backend, DeltaInputs, DeltaSpec, Error, KvView, Operation, Pool, QWeight, Result,
+    RopeSpec, dtype_code, shape,
 };
 use crate::gguf::GgmlDType;
 use std::collections::HashMap;
@@ -76,6 +77,11 @@ const KERNELS: &[&str] = &[
     "unary_f32",
     "gelu_tanh_mul_f32",
     "rope_split_half_f32",
+    "rope_partial_split_half_f32",
+    "sigmoid_mul_f32",
+    "ssm_conv_silu_f32",
+    "gated_delta_f32",
+    "gemv_q8_0",
     "attn_windowed_f16kv",
     "gemv_q5k",
 ];
@@ -1071,6 +1077,9 @@ impl Backend for CudaBackend {
                 | Operation::GeluTanhMul
                 | Operation::Softcap
                 | Operation::RopeSplitHalf
+                | Operation::RopePartialSplitHalf
+                | Operation::SigmoidMul
+                | Operation::GatedDeltaNet
                 | Operation::WindowedAttention
         )
     }
@@ -1103,6 +1112,40 @@ impl Backend for CudaBackend {
         factors: &Self::Buf,
     ) -> Result<()> {
         self.split_rope(x, pos, spec, factors)
+    }
+
+    fn rope_partial_split_half(
+        &self,
+        x: &mut Self::Buf,
+        pos: u32,
+        spec: &RopeSpec,
+        rotary_dim: usize,
+    ) -> Result<()> {
+        self.split_rope_partial(x, pos, spec, rotary_dim)
+    }
+
+    fn sigmoid_mul(&self, gate: &Self::Buf, x: &Self::Buf, y: &mut Self::Buf) -> Result<()> {
+        self.sigmoid_mul(gate, x, y)
+    }
+
+    fn ssm_conv_silu(
+        &self,
+        w: &Self::Buf,
+        state: &mut Self::Buf,
+        x: &Self::Buf,
+        y: &mut Self::Buf,
+    ) -> Result<()> {
+        self.ssm_conv_silu(w, state, x, y)
+    }
+
+    fn gated_delta_step(
+        &self,
+        spec: &DeltaSpec,
+        inputs: &DeltaInputs<Self::Buf>,
+        state: &mut Self::Buf,
+        o: &mut Self::Buf,
+    ) -> Result<()> {
+        self.gated_delta_step(spec, inputs, state, o)
     }
 
     fn attn_windowed(
@@ -1301,6 +1344,9 @@ impl Backend for CudaBackend {
         if w.dtype == GgmlDType::Q5K {
             return self.qmatmul_q5k(w, x, y, n_out, n_in, n_tokens);
         }
+        if w.dtype == GgmlDType::Q8_0 {
+            return self.qmatmul_q8_0(w, x, y, n_out, n_in, n_tokens);
+        }
         let mut w_ptr = w.buf.ptr;
         let mut x_ptr = x.ptr;
         let mut y_ptr = y.ptr;
@@ -1460,7 +1506,6 @@ impl Backend for CudaBackend {
         elem_offset: usize,
         n_elems: usize,
     ) -> Result<()> {
-        self.eager_only("kv_write")?;
         let src_bytes = n_elems * 4;
         let dst_bytes = (elem_offset + n_elems) * 2;
         if src_bytes > k.len || src_bytes > v.len || dst_bytes > dst_k.len || dst_bytes > dst_v.len
@@ -1477,11 +1522,12 @@ impl Backend for CudaBackend {
         let (mut dk, mut dv) = (dst_k.ptr, dst_v.ptr);
         let mut n = int(n_elems)?;
         let mut offset = long(elem_offset)?;
+        let mut pp = self.replay.as_ref().map_or(0, |replay| replay.params.ptr);
         self.launch(
             "kv_write_f16",
             [(n_elems as u32).div_ceil(256), 1, 1],
             [256, 1, 1],
-            &mut params!(k_ptr, v_ptr, dk, dv, n, offset),
+            &mut params!(k_ptr, v_ptr, dk, dv, n, offset, pp),
         )
     }
 

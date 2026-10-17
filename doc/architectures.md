@@ -163,8 +163,11 @@ Qwen3.5-9B. It counts toward the KV reservation but not the per-token KV
 figure. The state has absorbed every position written, so a session resumes
 only where it stopped; any other shared prefix restarts from position 0.
 
-CPU implements the required operations (`rope_partial_split_half`,
-`sigmoid_mul`, `ssm_conv_silu`, `gated_delta_step`); GPU backends reject
+CPU and CUDA implement the required operations (`rope_partial_split_half`,
+`sigmoid_mul`, `ssm_conv_silu`, `gated_delta_step`) and CUDA accepts the
+Q8_0 alpha/beta projections used by published Qwen3.5 files. CUDA graph
+replay captures from the current recurrent prefix; set `MDMA_CUDA_GRAPHS=0`
+to use the eager decoder. ROCm, Vulkan, Metal and Level Zero still reject
 `qwen35` before weight upload. The vision projector is not implemented.
 
 The `qwen35_cpu_greedy_checkpoint` test pins one Q4_K_M fixture's SHA-256 and
@@ -186,7 +189,7 @@ the prompt and flips a near tie in the English case at output 8;
 | Architecture | Example artifact | Remaining validation/task work |
 |---|---|---|
 | `qwen3` + classifier head | Qwen3-Reranker-4B | Dedicated two-class head/pooling and reranking API; do not treat two class logits as vocabulary logits |
-| `qwen35` | Qwen3.5-9B | Native CPU decoder and CPU checkpoint gate; GPU kernels, multi-token prediction drafting and vision projector |
+| `qwen35` | Qwen3.5-9B | Native CPU/CUDA decoder and CPU checkpoint gate; CUDA checkpoint parity, multi-token prediction drafting and vision projector |
 | `qwen2vl` | NuMarkdown-8B | Text decoder is separate from its image encoder/projector and OCR API |
 | `glm4` | GLM-4-32B-0414 | Native CPU/ROCm decoder and bounded ROCm checkpoint gate; raw-only cache policy and long-context validation |
 | `gemma2` | ShieldGemma-9B | Scaled embedding, four norms, GELU gating, attention/final softcaps, alternating local/global attention |

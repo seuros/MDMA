@@ -23,6 +23,7 @@ typedef unsigned u32x4 __attribute__((ext_vector_type(4)));
 #define DT_Q6K 3
 #define DT_BF16 4
 #define DT_Q5K 5
+#define DT_Q8_0 6
 #define BLOCK_Q5K 176
 
 // RoPE frequencies computed on the host with the CPU backend's powf, so
@@ -183,7 +184,8 @@ KERNEL void rope_kv_f16(float* q, const float* k, const float* v, _Float16* dk, 
 
 // f32 K/V rows into the f16 cache at element `offset`, rounded to
 // nearest even once on the way in.
-KERNEL void kv_write_f16(const float* k, const float* v, _Float16* dk, _Float16* dv, int n, long long offset) {
+KERNEL void kv_write_f16(const float* k, const float* v, _Float16* dk, _Float16* dv, int n, long long offset, const unsigned* pp) {
+    if (pp) offset = (long long)pp[1] * n;
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i < n) {
         dk[offset + i] = (_Float16)k[i];
@@ -630,6 +632,11 @@ KERNEL void embed_rows(const u8* table, const int* ids, float* out, int n_embd, 
     case DT_Q5K:
         v = q5k_at(table + (id * (n_embd / 256) + i / 256) * BLOCK_Q5K, i % 256);
         break;
+    case DT_Q8_0: {
+        const u8* blk = table + (id * (n_embd / 32) + i / 32) * 34;
+        v = half_at(blk) * (float)((const i8*)(blk + 2))[i % 32];
+        break;
+    }
     default: {
         const u8* blk = table + (id * (n_embd / 256) + i / 256) * block_bytes;
         int e = i % 256;

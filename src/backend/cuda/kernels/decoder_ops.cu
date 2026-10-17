@@ -45,6 +45,170 @@ KERNEL void rope_split_half_f32(float* x, const float* factors, int n, int hd, u
     x[i + half] = a * s + b * c;
 }
 
+// Split-half RoPE over the first rotary_dim values of each head. Under CUDA
+// graph replay pp holds (token, position); the host-filled Freqs table uses
+// rotary_dim, matching the CPU operation's exponent denominator.
+KERNEL void rope_partial_split_half_f32(float* x, int n, int hd, int rotary_dim, unsigned pos, Freqs fr, const unsigned* pp) {
+    if (pp) pos = pp[1];
+    int pair = blockIdx.x * blockDim.x + threadIdx.x;
+    int pairs_per_head = rotary_dim / 2;
+    int total = (n / hd) * pairs_per_head;
+    if (pair >= total) return;
+    int half = pairs_per_head;
+    int j = pair % half;
+    long i = (long)(pair / half) * hd + j;
+    float angle = (float)pos * fr.f[j];
+    float s, c;
+    sincos_acc(angle, &s, &c);
+    float a = x[i], b = x[i + half];
+    x[i] = a * c - b * s;
+    x[i + half] = a * s + b * c;
+}
+
+KERNEL void sigmoid_mul_f32(const float* gate, const float* x, float* y, int n) {
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i < n) y[i] = x[i] / (1.0f + fexp(-gate[i]));
+}
+
+// Q8_0 matvec, one warp per output row. Each 32-element block stores an f16
+// scale followed by 32 signed bytes. This path is used by Qwen3.5's alpha and
+// beta projections, whose weights are commonly Q8_0 rather than K-quantized.
+KERNEL void gemv_q8_0(const u8* w, const float* x, float* y, int n_out, int n_in) {
+    int row = blockIdx.x * blockDim.y + threadIdx.y;
+    int t = blockIdx.y;
+    if (row >= n_out) return;
+    const float* xt = x + (long)t * n_in;
+    const u8* wr = w + (long)row * (n_in / 32) * 34;
+    float acc = 0.0f;
+    for (int i = threadIdx.x; i < n_in; i += 32) {
+        const u8* block = wr + (i / 32) * 34;
+        acc += half_at(block) * (float)((const i8*)(block + 2))[i % 32] * xt[i];
+    }
+    acc = warp_sum(acc);
+    if (threadIdx.x == 0) y[(long)t * n_out + row] = acc;
+}
+
+// One token of the causal depthwise convolution used by Qwen3.5 DeltaNet.
+// Each channel has an independent filter and state window, so one thread can
+// update one channel without a block-wide barrier.
+KERNEL void ssm_conv_silu_f32(const float* w, float* state, const float* x, float* y, int channels, int taps) {
+    int channel = blockIdx.x * blockDim.x + threadIdx.x;
+    if (channel >= channels) return;
+    const float* wc = w + (long)channel * taps;
+    float* past = state + (long)channel * (taps - 1);
+    float sum = x[channel] * wc[taps - 1];
+    for (int i = 0; i < taps - 1; i++) {
+        sum += past[i] * wc[i];
+        if (i + 1 < taps - 1) past[i] = past[i + 1];
+    }
+    past[taps - 2] = x[channel];
+    y[channel] = sum / (1.0f + fexp(-sum));
+}
+
+#define DELTA_MAX_HEAD_DIM 256
+
+// Approximate softplus without libdevice. The log2 intrinsic is available in
+// the CUDA device-only clang build; fexp is the same fast exponential used by
+// the rest of the backend. The branch keeps the positive large-x path stable.
+__device__ static inline float softplus_acc(float x) {
+    if (x > 20.0f) return x;
+    float e = x > 0.0f ? fexp(-x) : fexp(x);
+    float log1p = __nvvm_lg2_approx_ftz_f(1.0f + e) * 0.6931471805599453f;
+    return x > 0.0f ? x + log1p : log1p;
+}
+
+// One block per value head for one token of the gated DeltaNet recurrence.
+// q/k normalization is shared by the value heads that map to the same key
+// head only conceptually; each block keeps its normalized vectors in shared
+// memory so the d x d state update can reuse them for every row.
+KERNEL void gated_delta_f32(
+    const float* qkv,
+    const float* alpha,
+    const float* beta,
+    const float* dt_bias,
+    const float* a,
+    float* state,
+    float* o,
+    int n_k_heads,
+    int n_v_heads,
+    int head_dim,
+    float eps
+) {
+    int h = blockIdx.x;
+    int tid = threadIdx.x;
+    if (h >= n_v_heads || head_dim > DELTA_MAX_HEAD_DIM) return;
+    int kh = h % n_k_heads;
+    __shared__ float qn[DELTA_MAX_HEAD_DIM];
+    __shared__ float kn[DELTA_MAX_HEAD_DIM];
+    __shared__ float red[DELTA_MAX_HEAD_DIM];
+
+    if (tid < head_dim) {
+        qn[tid] = qkv[(long)kh * head_dim + tid];
+        kn[tid] = qkv[(long)(n_k_heads + kh) * head_dim + tid];
+    } else {
+        qn[tid] = 0.0f;
+        kn[tid] = 0.0f;
+    }
+    red[tid] = qn[tid] * qn[tid];
+    __syncthreads();
+    for (int step = DELTA_MAX_HEAD_DIM / 2; step > 0; step >>= 1) {
+        if (tid < step) red[tid] += red[tid + step];
+        __syncthreads();
+    }
+    float qscale = 1.0f / __nvvm_sqrt_rn_f(red[0] + eps);
+    if (tid < head_dim) qn[tid] *= qscale;
+    red[tid] = kn[tid] * kn[tid];
+    __syncthreads();
+    for (int step = DELTA_MAX_HEAD_DIM / 2; step > 0; step >>= 1) {
+        if (tid < step) red[tid] += red[tid + step];
+        __syncthreads();
+    }
+    float kscale = 1.0f / __nvvm_sqrt_rn_f(red[0] + eps);
+    if (tid < head_dim) kn[tid] *= kscale;
+    __syncthreads();
+
+    float gate = alpha[h] + dt_bias[h];
+    float decay = fexp(softplus_acc(gate) * a[h]);
+    float rate = 1.0f / (1.0f + fexp(-beta[h]));
+    float out_scale = 1.0f / __nvvm_sqrt_rn_f((float)head_dim);
+    const float* v = qkv + (long)(2 * n_k_heads + h) * head_dim;
+    float* sh = state + (long)h * head_dim * head_dim;
+    float* oh = o + (long)h * head_dim;
+
+    for (int row = 0; row < head_dim; row++) {
+        float dot = 0.0f;
+        for (int col = tid; col < head_dim; col += blockDim.x) {
+            long index = (long)row * head_dim + col;
+            sh[index] *= decay;
+            dot += sh[index] * kn[col];
+        }
+        red[tid] = dot;
+        __syncthreads();
+        for (int step = DELTA_MAX_HEAD_DIM / 2; step > 0; step >>= 1) {
+            if (tid < step) red[tid] += red[tid + step];
+            __syncthreads();
+        }
+        float delta = (v[row] - red[0]) * rate;
+        for (int col = tid; col < head_dim; col += blockDim.x) {
+            long index = (long)row * head_dim + col;
+            sh[index] += kn[col] * delta;
+        }
+        __syncthreads();
+        float out_dot = 0.0f;
+        for (int col = tid; col < head_dim; col += blockDim.x) {
+            out_dot += sh[(long)row * head_dim + col] * qn[col];
+        }
+        red[tid] = out_dot;
+        __syncthreads();
+        for (int step = DELTA_MAX_HEAD_DIM / 2; step > 0; step >>= 1) {
+            if (tid < step) red[tid] += red[tid + step];
+            __syncthreads();
+        }
+        if (tid == 0) oh[row] = red[0] * out_scale;
+        __syncthreads();
+    }
+}
+
 #define DW_THREADS 128
 #define DW_CHUNK 256
 #define DW_MAX_HEAD_DIM 512

@@ -140,7 +140,11 @@ impl GraphState {
         kv: &mut KvCache<CudaBackend>,
         ws: &mut Workspace<CudaBackend>,
     ) -> Result<Self> {
-        model.validate_decode(kv, ws, 0, 0)?;
+        // Capture from the current prefix.  This matters for recurrent
+        // decoders: position zero is no longer resumable after prefill, and
+        // the captured state must start from the already-processed prefix.
+        let capture_pos = kv.len() as u32;
+        model.validate_decode(kv, ws, 0, capture_pos)?;
         let config = model.config();
         let backend = eager.graph_twin(kv.capacity())?;
         // Capture cannot allocate: reserve the widest decode's scratch.
@@ -184,7 +188,7 @@ impl GraphState {
         })?;
         let saved_len = kv.len();
         let capture = Capture::begin(backend.stream)?;
-        let recorded = model.forward_device(&backend, kv, ws, 0, 0);
+        let recorded = model.forward_device(&backend, kv, ws, 0, capture_pos);
         let captured = capture.finish();
         kv.set_len(saved_len);
         recorded?;
