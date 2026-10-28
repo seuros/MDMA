@@ -2,9 +2,13 @@ use super::{Decoder, Model, ModelConfig};
 use crate::backend::{Backend, Error, Result};
 use crate::gguf::GgufModel;
 use crate::kv_cache::KvCache;
-use crate::memory::{MemoryCategory, NativeMemoryBudget, Reservation, product, sum};
+use crate::memory::{NativeMemoryBudget, Reservation, product, sum};
+#[cfg(feature = "service")]
+use crate::memory::MemoryCategory;
+#[cfg(feature = "service")]
 use std::sync::Arc;
 
+#[cfg(feature = "service")]
 #[derive(Default)]
 pub(crate) struct RequestMemory {
     pub kv: Option<Reservation>,
@@ -155,6 +159,7 @@ impl<B: Backend> Model<B> {
         }
     }
 
+    #[cfg(feature = "service")]
     pub(crate) fn reserve_request(
         &self,
         backend: &B,

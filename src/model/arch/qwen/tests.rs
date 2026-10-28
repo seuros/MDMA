@@ -13,7 +13,7 @@ use candle_core::{
 use std::assert_matches;
 use std::collections::BTreeMap;
 
-fn fixture(arch: &str, width: usize, head: usize) -> Fixture {
+pub(in crate::model) fn fixture(arch: &str, width: usize, head: usize) -> Fixture {
     let mut f = Fixture::new(2, width);
     f.metadata = f
         .metadata
@@ -71,7 +71,7 @@ fn fixture(arch: &str, width: usize, head: usize) -> Fixture {
                 let t = Tensor::from_vec(values, &[head], &Device::Cpu).unwrap();
                 f.tensors.push((
                     format!("blk.{i}.{name}.weight"),
-                    QTensor::quantize(&t, GgmlDType::F32).unwrap(),
+                    QTensor::quantize(&t, GgmlDType::F32.candle().unwrap()).unwrap(),
                 ));
             }
         } else {
@@ -80,7 +80,7 @@ fn fixture(arch: &str, width: usize, head: usize) -> Fixture {
                 let t = Tensor::from_vec(values, &[n], &Device::Cpu).unwrap();
                 f.tensors.push((
                     format!("blk.{i}.{name}.bias"),
-                    QTensor::quantize(&t, GgmlDType::F32).unwrap(),
+                    QTensor::quantize(&t, GgmlDType::F32.candle().unwrap()).unwrap(),
                 ));
             }
         }
@@ -120,7 +120,7 @@ fn qwen_preflight_handles_independent_heads_and_tied_embeddings() {
 fn qwen_rejects_unimplemented_metadata_and_task_heads_before_upload() {
     for (suffix, value) in [
         ("attention.causal", Value::Bool(false)),
-        ("rope.scaling.type", Value::String("yarn".into())),
+        ("rope.scaling.type", Value::String("linear".into())),
         ("pooling_type", Value::U32(4)),
         ("attention.value_length", Value::U32(4)),
         ("attention.key_length", Value::U32(0)),

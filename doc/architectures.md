@@ -32,7 +32,7 @@ Qwen2/Qwen3 and hybrid Qwen3.5 text decoder layouts, not arbitrary llama.cpp
 models. Qwen2-VL
 accepts text input only: its image projector/OCR path is not implemented.
 The pinned GLM-4-32B checkpoint gate covers three bounded greedy references on
-ROCm in f32 and fast modes; Qwen3's checkpoint gate remains open.
+ROCm in f32 and fast modes; Qwen3-8B's checkpoint gate remains open.
 Architecture, geometry, tensor shapes, backend dtypes and file
 extents are checked before weight uploads; the registry preflights every
 native GGUF before loading any weights.
@@ -57,7 +57,9 @@ native execution/preflight module:
   tensor budgets; the existing Llama and Gemma4 allocation layouts are preserved.
 
 Backend admission requires split-half RoPE and, for Qwen2, bias addition.
-CPU and ROCm implement both; Vulkan/Metal currently lack Qwen2 bias addition.
+CPU, ROCm and Metal implement both; Vulkan currently lacks Qwen2 bias addition.
+The new Metal bias/HybridLink path still needs native Mac validation; existing
+Metal model qualifications do not automatically extend to it.
 Backend dtype/head limits still apply. Q8_0 is supported by the CPU decoder,
 not the current ROCm decoder.
 
@@ -67,6 +69,13 @@ before backend allocation/upload. The registry also validates tokenizers
 before loading weights. Prompts are raw text; supply chat markers explicitly.
 
 ### Checkpoint validation boundary
+
+Bonsai 1.7B Q1_0 runs through the native CPU Qwen3 decoder with packed
+128-weight/18-byte blocks and static YaRN. Only the declared scaling type,
+factor and original context length are admitted; unknown scaling overrides
+are rejected. Its short greedy CPU gate is independent of the still-open
+Qwen3-8B gate and does not qualify GPU or long-context use.
+See [Bonsai provenance, validation and limits](bonsai.md).
 
 Synthetic CPU/ROCm tests cover Qwen2/Qwen3 in f32 and fast modes. Checkpoint
 tokenizer tests compare Qwen3-8B and NuMarkdown against llama.cpp, including

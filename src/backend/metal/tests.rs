@@ -8,6 +8,7 @@ mod batching;
 mod benchmarks;
 mod fusion;
 mod prefill;
+mod hybrid;
 
 #[test]
 fn host_and_shader_use_shared_dtype_tags() {

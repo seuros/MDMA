@@ -149,6 +149,9 @@ pub enum Operation {
     SigmoidMul,
     /// `ssm_conv_silu` and `gated_delta_step`, the recurrent half of a hybrid decoder.
     GatedDeltaNet,
+    LayerNorm,
+    Gelu,
+    Argmax,
 }
 
 /// Gated DeltaNet geometry. Value head `h` reads query/key head
@@ -561,6 +564,12 @@ pub trait Backend {
     fn gelu(&self, x: &Self::Buf, y: &mut Self::Buf) -> Result<()> {
         let _ = (x, y);
         Err(Error::NotImplemented("gelu"))
+    }
+    /// Lowest-index maximum of a nonempty f32 vector, written as one u32.
+    /// Any nonfinite input produces u32::MAX instead of a valid token.
+    fn argmax(&self, x: &Self::Buf, index: &mut Self::Buf) -> Result<()> {
+        let _ = (x, index);
+        Err(Error::NotImplemented("argmax"))
     }
     /// `y = gelu(a) * gate` - the GeGLU half of ModernBERT's MLP.
     fn gelu_mul(&self, a: &Self::Buf, gate: &Self::Buf, y: &mut Self::Buf) -> Result<()> {

@@ -44,7 +44,7 @@ impl Builder {
         let tensor = Tensor::from_vec(data, shape, &Device::Cpu).unwrap();
         self.tensors.push((
             name.into(),
-            QTensor::quantize(&tensor, GgmlDType::F32).unwrap(),
+            QTensor::quantize(&tensor, GgmlDType::F32.candle().unwrap()).unwrap(),
         ));
     }
 
@@ -537,6 +537,7 @@ fn compat_rejects_bad_metadata_and_missing_tensors() {
 }
 
 #[test]
+#[cfg(feature = "service")]
 fn registry_compat_caps_reported_context_to_model_limit() {
     use crate::registry::{Options, Registry, Source};
     for gemma in [false, true] {

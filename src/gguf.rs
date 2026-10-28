@@ -1,7 +1,9 @@
 //! GGUF metadata and raw weight loading.
-pub use candle_core::quantized::GgmlDType;
+mod dtype;
+mod header;
+pub use dtype::GgmlDType;
 
-use candle_core::quantized::gguf_file::{Content, Value};
+use candle_core::quantized::gguf_file::Value;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
@@ -58,31 +60,16 @@ impl GgufModel {
 
     fn read(mut file: File, private: bool) -> Result<Self> {
         let source_stamp = crate::cache::Stamp::read(&file.metadata()?)?;
-        let content = Content::read(&mut file).map_err(|e| Error::Parse(e.to_string()))?;
+        let content = header::read(&mut file)?;
         unchanged(&source_stamp, private, file.metadata()?)?;
-
-        let tensors = content
-            .tensor_infos
-            .into_iter()
-            .map(|(name, info)| {
-                let n_bytes = tensor_n_bytes(&name, info.ggml_dtype, info.shape.dims())?;
-                let desc = TensorDesc {
-                    dtype: info.ggml_dtype,
-                    shape: info.shape.dims().to_vec(),
-                    offset: info.offset,
-                    n_bytes,
-                };
-                Ok((name, desc))
-            })
-            .collect::<Result<HashMap<_, _>>>()?;
 
         Ok(Self {
             file,
             source_stamp,
             private,
-            tensor_data_offset: content.tensor_data_offset,
+            tensor_data_offset: content.data_offset,
             metadata: content.metadata,
-            tensors,
+            tensors: content.tensors,
             cached: None,
         })
     }
@@ -307,6 +294,7 @@ const fn dtype_name(dtype: GgmlDType) -> &'static str {
         GgmlDType::Q5K => "Q5_K",
         GgmlDType::Q6K => "Q6_K",
         GgmlDType::Q8K => "Q8_K",
+        GgmlDType::Q1_0 => "Q1_0",
     }
 }
 

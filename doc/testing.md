@@ -17,6 +17,16 @@ cargo test --release --features coral --test coral
 ```
 
 All tests and benchmarks that load external GGUF checkpoints are ignored by default.
+The separate native CPU [Bonsai Q1_0 gate](bonsai.md) pins the artifact SHA-256
+and compares prompt/greedy token IDs with the Prism reference:
+
+```sh
+MDMA_TEST_BONSAI_GGUF="$HOME/models/bonsai-1.7b/Bonsai-1.7B-Q1_0.gguf" \
+RAYON_NUM_THREADS=2 MDMA_CACHE=off \
+cargo test --release --locked --no-default-features --lib \
+  model::bonsai_tests::bonsai_cpu_checkpoint -- --ignored --exact --test-threads=1
+```
+
 Synthetic Llama, Gemma, ModernBERT, and Laya-head compatibility tests always run with `cargo test`;
 `--features metal`, `rocm`, or `vulkan` adds GPU compatibility tests. Separate optional
 TinyLlama/Gemma checkpoint gates use `MDMA_TEST_TINYLLAMA_GGUF` and

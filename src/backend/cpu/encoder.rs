@@ -12,6 +12,7 @@ pub(super) fn layernorm(
     eps: f32,
 ) -> Result<()> {
     let dim = w.len();
+    shape::norm_epsilon(eps)?;
     shape::layernorm(dim, b.map(<[f32]>::len), x.len(), y.len())?;
     for (row, out) in x.chunks_exact(dim).zip(y.chunks_exact_mut(dim)) {
         let mean = row.iter().sum::<f32>() / dim as f32;

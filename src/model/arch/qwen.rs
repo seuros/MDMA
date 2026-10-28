@@ -6,7 +6,9 @@ use crate::kv_cache::KvCache;
 use crate::memory::product;
 use crate::model::{Model, ModelConfig, load_norm, load_output, load_weight};
 
+pub(in crate::model) mod hf;
 mod preflight;
+mod yarn;
 pub(in crate::model) use preflight::config as preflight_config;
 #[cfg(test)]
 pub(crate) mod tests;
@@ -32,6 +34,7 @@ struct Layer<B: Backend> {
 pub(in crate::model) struct Qwen<B: Backend> {
     layers: Vec<Layer<B>>,
     factors: B::Buf,
+    rope_amplitude: f32,
 }
 
 pub(in crate::model) struct Workspace<B: Backend> {
@@ -40,16 +43,20 @@ pub(in crate::model) struct Workspace<B: Backend> {
 
 impl<B: Backend> Qwen<B> {
     pub fn load(b: &B, g: &mut GgufModel, c: ModelConfig) -> Result<Model<B>> {
-        let qwen3 = g.metadata_str("general.architecture") == Some("qwen3");
+        let arch = g
+            .metadata_str("general.architecture")
+            .expect("validated architecture");
+        let qwen3 = arch == "qwen3";
+        let scaling = yarn::Yarn::read(g, arch, &c)?;
         let token_embd = load_weight(b, g, "token_embd.weight")?;
         let output_norm = load_norm(b, g, "output_norm.weight")?;
         let output = load_output(b, g)?;
+        let divisors = scaling
+            .as_ref()
+            .map_or_else(|| vec![1f32; c.head_dim / 2], |y| y.divisors(&c));
+        let rope_amplitude = scaling.as_ref().map_or(1.0, yarn::Yarn::amplitude);
         let mut factors = b.alloc(product(&[c.head_dim / 2, 4])?, Pool::Weights)?;
-        b.upload(
-            &mut factors,
-            0,
-            bytemuck::cast_slice(&vec![1f32; c.head_dim / 2]),
-        )?;
+        b.upload(&mut factors, 0, bytemuck::cast_slice(&divisors))?;
         let mut layers = Vec::with_capacity(c.n_layers);
         for i in 0..c.n_layers {
             let name = |s: &str| format!("blk.{i}.{s}.weight");
@@ -87,7 +94,11 @@ impl<B: Backend> Qwen<B> {
             token_embd,
             output_norm,
             output,
-            architecture: Decoder::Qwen(Self { layers, factors }),
+            architecture: Decoder::Qwen(Self {
+                layers,
+                factors,
+                rope_amplitude,
+            }),
             bos: None,
             memory: None,
         })
@@ -116,6 +127,19 @@ impl<B: Backend> Qwen<B> {
         token: u32,
         pos: u32,
     ) -> Result<()> {
+        b.embed(&model.token_embd, &[token], &mut ws.x)?;
+        self.run_embedded(b, model, kv, ws, pos)
+    }
+
+    // The caller fills ws.x with one embedding row, including continuous inputs.
+    pub(in crate::model) fn run_embedded(
+        &self,
+        b: &B,
+        model: &Model<B>,
+        kv: &mut KvCache<B>,
+        ws: &mut crate::model::Workspace<B>,
+        pos: u32,
+    ) -> Result<()> {
         let c = &model.config;
         let extra = ws.qwen.as_mut().expect("Qwen workspace was allocated");
         let rope = RopeSpec {
@@ -127,7 +151,6 @@ impl<B: Backend> Qwen<B> {
             n_q_heads: c.n_heads,
             n_kv_heads: c.n_kv_heads,
         };
-        b.embed(&model.token_embd, &[token], &mut ws.x)?;
         #[cfg(test)]
         tests::trace(b, &ws.x, c.n_embd, "inp_embd", 0, pos)?;
         for (i, l) in self.layers.iter().enumerate() {
@@ -158,6 +181,10 @@ impl<B: Backend> Qwen<B> {
             }
             b.rope_split_half(&mut ws.q, pos, &rope, &self.factors)?;
             b.rope_split_half(&mut ws.k, pos, &rope, &self.factors)?;
+            if self.rope_amplitude != 1.0 {
+                b.scale(&mut ws.q, self.rope_amplitude)?;
+                b.scale(&mut ws.k, self.rope_amplitude)?;
+            }
             #[cfg(test)]
             if i <= 1 {
                 tests::trace(b, &ws.q, c.n_heads * c.head_dim, "Qcur", i, pos)?;

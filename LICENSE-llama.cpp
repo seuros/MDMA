@@ -8,6 +8,11 @@ src/backend/vulkan/kernels/attn_tile.comp adapts the generic flash_attn.comp
 tiling and online-softmax path from llama.cpp commit
 bed0a856606ee4a24a164066f73d2379447033f5.
 
+The Q1_0 layout/dequantization in src/backend/cpu/dequant.rs and static YaRN
+formula in src/model/arch/qwen/yarn.rs follow the ggml implementation in
+PrismML-Eng/llama.cpp commit c96baf4abe24d11a50f326e40b6223b687449d63.
+The same MIT notice below applies to these adaptations.
+
 MIT License
 
 Copyright (c) 2023-2026 The ggml authors

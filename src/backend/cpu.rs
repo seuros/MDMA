@@ -299,8 +299,26 @@ impl Backend for CpuBackend {
             | Operation::RopePartialInterleaved
             | Operation::RopePartialSplitHalf
             | Operation::SigmoidMul
-            | Operation::GatedDeltaNet => true,
+            | Operation::GatedDeltaNet
+            | Operation::LayerNorm
+            | Operation::Gelu
+            | Operation::Argmax => true,
         }
+    }
+
+    fn argmax(&self, x: &CpuBuf, index: &mut CpuBuf) -> Result<()> {
+        let x = as_f32(&x.0)?;
+        shape::argmax(x.len(), index.0.len())?;
+        let mut best = 0;
+        for i in 0..x.len() {
+            if !x[i].is_finite() {
+                index.0.copy_from_slice(&u32::MAX.to_ne_bytes());
+                return Ok(());
+            }
+            if x[i] > x[best] { best = i; }
+        }
+        index.0.copy_from_slice(&(best as u32).to_ne_bytes());
+        Ok(())
     }
 
     fn scale(&self, x: &mut CpuBuf, factor: f32) -> Result<()> {

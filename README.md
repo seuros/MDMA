@@ -6,7 +6,8 @@ serve each other privately.
 
 mdma is an inference engine: GGUF loader,
 tokenizers, transformer decoders, KV cache, sampler, and hand-written compute
-kernels behind one `Backend` trait, served over gRPC with mandatory mTLS.
+kernels behind one `Backend` trait. Embed it as a Rust crate, or enable the
+optional gRPC service with mandatory mTLS.
 
 > **Status: experimental.** mdma runs, and is tested, on the specific hardware
 > and models listed below. Expect rough edges, missing features and breaking
@@ -78,6 +79,21 @@ prefill co-processors. See the [roadmap](#roadmap).
 The compute and memory planes are hand-rolled on purpose; everything else
 (HTTP/gRPC, TLS, serialization, state machines) comes from established libraries.
 
+## Rust library
+
+```toml
+[dependencies]
+mdma = { path = "../mdma", default-features = false, features = ["rocm"] }
+```
+
+Omit `rocm` for CPU only. `mdma::hybrid_agent::{Engine, Session, Step}` provides
+owned, resumable HA inference with shared weights and private persistent KV.
+The application owns tools and orchestration.
+See [embedding API, features and examples](doc/embedding.md).
+
+The default build is library-only. Enable `cli` for local runners, and
+`cli,service` for the daemon/client and full `mdma` CLI.
+
 ## What works today
 
 ### Backends
@@ -102,9 +118,13 @@ weights. Unsupported architectures are rejected, not approximated.
 |---|---|---|
 | `llama`, `internlm2` | Bespoke-MiniCheck-7B, TinyLlama 1.1B Chat | all |
 | `gemma4` (text only) | Gemma 4 E2B IT | CPU, Metal, ROCm, Vulkan, CUDA |
-| `qwen2`, `qwen3`, `qwen2vl` (text only) | NuMarkdown-8B; Qwen3-8B still open | CPU, ROCm |
+| `qwen2`, `qwen3`, `qwen2vl` (text only) | NuMarkdown-8B; Bonsai 1.7B Q1_0 (CPU); Qwen3-8B still open | CPU, ROCm |
 | `qwen35` (text only) | Qwen3.5-9B | CPU, CUDA |
 | `glm4` | GLM-4-32B-0414 | CPU, ROCm |
+
+[Bonsai Q1_0](doc/bonsai.md) uses packed native CPU weights and static Qwen3
+YaRN. Its bounded greedy reference gate does not qualify GPU, phone or
+long-context execution; Q1_0 is rejected by GPU kernels.
 
 Bespoke-MiniCheck answers `Decide`: a document and claims in, the probability
 each claim is supported out ([serving](doc/serving.md#grpc-api)).
@@ -112,6 +132,11 @@ each claim is supported out ([serving](doc/serving.md#grpc-api)).
 heads) run on the CPU; the published Laya checkpoint currently fails tokenizer
 loading. See [architectures](doc/architectures.md) for per-model boundaries
 and remaining work.
+
+The experimental [HybridAgent runner](doc/hybrid-agent.md) loads the trained
+8B HF bundle directly, with native HybridLink and continuous-input Qwen3 decoding.
+`mdma-ha` runs on CPU and ROCm in f32 compute/KV mode, verified locally on the
+i9-14900K and Radeon AI PRO R9700. It is not an autonomous tool runner or agent service.
 
 ## Help wanted: test it on your hardware
 
@@ -127,7 +152,7 @@ hardware are the most useful contribution right now, whether they pass or fail.
 | Other | FreeBSD hosts, Coral PCIe/M.2 cards, USB Coral (detected only) | `cpu`, `coral`, `mdma info` |
 
 ```sh
-cargo build --release --features vulkan --bin mdma          # or rocm, cuda, level0, metal
+cargo build --release --features cli,service,vulkan --bin mdma # or rocm, cuda, level0, metal
 target/release/mdma info --json > info.json
 target/release/mdma doctor --backend vulkan --json > doctor.json
 cargo test --release --features vulkan                      # fixture-free kernel tests
@@ -146,7 +171,7 @@ New to mdma? [Getting started](doc/getting-started.md) walks three ordinary
 with every step tested.
 
 ```sh
-cargo build --release
+cargo build --release --features cli,service
 target/release/mdma info                  # hardware inventory
 target/release/mdma doctor                # smoke-test compiled backends
 
@@ -185,16 +210,17 @@ with `MDMA_BACKEND=coral`, on a build with the matching feature. Use your own PK
 Rust 1.99+ (`mise.toml` pins it).
 
 ```sh
-cargo build --release                    # CPU backend
-cargo build --release --features rocm    # + HIP backend (needs /opt/rocm; gfx1201 by default,
+cargo build --release --lib              # CPU library only
+cargo build --release --features cli,service # CPU tools and optional service
+cargo build --release --features cli,service,rocm # + HIP backend (needs /opt/rocm; gfx1201 by default,
                                          #   MDMA_HIP_OFFLOAD_ARCH=gfx... to override)
-cargo build --release --features level0  # + Intel Level Zero (needs ocloc; mtl by default,
+cargo build --release --features cli,service,level0 # + Intel Level Zero (needs ocloc; mtl by default,
                                          #   MDMA_OCLOC_DEVICE=... to override)
-cargo build --release --features vulkan  # + Vulkan (needs glslangValidator and libvulkan; GLSLANG= to override)
-cargo build --release --features cuda    # + NVIDIA (needs clang with the NVPTX target and libcuda from the driver;
+cargo build --release --features cli,service,vulkan # + Vulkan (needs glslangValidator and libvulkan; GLSLANG= to override)
+cargo build --release --features cli,service,cuda # + NVIDIA (needs clang with the NVPTX target and libcuda from the driver;
                                          #   sm_86 by default, MDMA_CUDA_ARCH=sm_... and CLANG= to override)
-cargo build --release --features metal   # + native Metal on macOS 12+, unified-memory GPU
-cargo build --release --features coral   # + Coral Edge TPU, PCIe/M.2 cards on FreeBSD and Linux
+cargo build --release --features cli,service,metal # + native Metal on macOS 12+, unified-memory GPU
+cargo build --release --features cli,service,coral # + Coral Edge TPU, PCIe/M.2 cards on FreeBSD and Linux
 ```
 
 FreeBSD builds need `protoc` on `PATH`; Vulkan builds there also need

@@ -253,7 +253,7 @@ impl Tokenizer {
     }
 
     /// Byte BPE may defer text until a split UTF-8 sequence is complete.
-    pub(crate) fn stream_decoder(&self) -> impl FnMut(u32) -> crate::backend::Result<String> + '_ {
+    pub fn stream_decoder(&self) -> impl FnMut(u32) -> crate::backend::Result<String> + '_ {
         let mut stream = self.byte_bpe.as_ref().map(|bpe| bpe.decode_stream(false));
         move |id| match &mut stream {
             Some(stream) => stream

@@ -25,6 +25,7 @@ pub fn code(dtype: GgmlDType) -> Result<i32> {
         GgmlDType::Q3K => Err(Error::NotImplemented("Q3K weights on GPU")),
         GgmlDType::Q5K => Err(Error::NotImplemented("Q5K weights on GPU")),
         GgmlDType::Q8K => Err(Error::NotImplemented("Q8K weights on GPU")),
+        GgmlDType::Q1_0 => Err(Error::NotImplemented("Q1_0 weights on GPU")),
     }
 }
 

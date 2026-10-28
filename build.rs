@@ -11,16 +11,19 @@ fn main() {
     // Changes to the generator/kernel build logic must invalidate cached output.
     println!("cargo::rerun-if-changed=build.rs");
     build_identity();
-    rama::http::grpc::build::protobuf::configure()
-        .with_type_attribute(".mdma", "#[derive(serde::Serialize)]")
-        .compile_protos(&["proto/mdma.proto"], &["proto"])
-        .unwrap_or_else(|e| panic!("failed to compile proto/mdma.proto: {e}"));
-    for proto in ["proto/node.proto", "proto/federation.proto"] {
-        rama::http::grpc::build::protobuf::compile_protos(proto)
-            .unwrap_or_else(|e| panic!("failed to compile {proto}: {e}"));
+    #[cfg(feature = "service")]
+    {
+        rama::http::grpc::build::protobuf::configure()
+            .with_type_attribute(".mdma", "#[derive(serde::Serialize)]")
+            .compile_protos(&["proto/mdma.proto"], &["proto"])
+            .unwrap_or_else(|e| panic!("failed to compile proto/mdma.proto: {e}"));
+        for proto in ["proto/node.proto", "proto/federation.proto"] {
+            rama::http::grpc::build::protobuf::compile_protos(proto)
+                .unwrap_or_else(|e| panic!("failed to compile {proto}: {e}"));
+        }
+        println!("cargo::rerun-if-changed=proto");
     }
-    println!("cargo::rerun-if-changed=proto");
-    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("macos") {
+    if cfg!(feature = "service") && std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("macos") {
         embed_info_plists();
     }
 
@@ -145,6 +148,7 @@ fn build_hip_kernels() {
     println!("cargo::rerun-if-changed=src/backend/rocm/kernels/decode.hip");
     println!("cargo::rerun-if-changed=src/backend/rocm/kernels/attention.hip");
     println!("cargo::rerun-if-changed=src/backend/rocm/kernels/decoder_ops.hip");
+    println!("cargo::rerun-if-changed=src/backend/rocm/kernels/hybrid.hip");
     println!("cargo::rerun-if-changed=src/cache/layout_abi.rs");
     println!("cargo::rerun-if-env-changed=MDMA_HIP_OFFLOAD_ARCH");
 

@@ -26,6 +26,7 @@ unsafe extern "C" {}
 
 mod abi;
 mod batch;
+mod hybrid;
 const KERNELS: &[&str] = &[
     "copy_bytes",
     "add_f32",
@@ -43,6 +44,10 @@ const KERNELS: &[&str] = &[
     "softcap_f32",
     "gelu_tanh_mul_f32",
     "rope_split_half",
+    "layernorm_f32",
+    "gelu_f32",
+    "add_bias_f32",
+    "argmax_f32",
 ];
 
 /// Scalar/elementwise kernels count individual threads; cooperative kernels
@@ -751,13 +756,32 @@ impl Backend for MetalBackend {
             | Operation::GeluTanhMul
             | Operation::Softcap
             | Operation::RopeSplitHalf
-            | Operation::WindowedAttention => true,
-            Operation::AddBias
-            | Operation::RopePartialInterleaved
+            | Operation::WindowedAttention
+            | Operation::AddBias
+            | Operation::LayerNorm
+            | Operation::Gelu
+            | Operation::Argmax => true,
+            Operation::RopePartialInterleaved
             | Operation::RopePartialSplitHalf
             | Operation::SigmoidMul
             | Operation::GatedDeltaNet => false,
         }
+    }
+
+    fn layernorm(&self, w: &MetalBuf, bias: Option<&MetalBuf>, x: &MetalBuf, y: &mut MetalBuf, eps: f32) -> Result<()> {
+        self.hybrid_layernorm(w, bias, x, y, eps)
+    }
+
+    fn gelu(&self, x: &MetalBuf, y: &mut MetalBuf) -> Result<()> {
+        self.hybrid_gelu(x, y)
+    }
+
+    fn add_bias(&self, bias: &MetalBuf, y: &mut MetalBuf) -> Result<()> {
+        self.hybrid_add_bias(bias, y)
+    }
+
+    fn argmax(&self, x: &MetalBuf, index: &mut MetalBuf) -> Result<()> {
+        self.hybrid_argmax(x, index)
     }
 
     fn scale(&self, x: &mut MetalBuf, factor: f32) -> Result<()> {

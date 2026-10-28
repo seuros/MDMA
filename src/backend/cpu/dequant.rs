@@ -38,6 +38,31 @@ pub fn dequantize_row(dtype: GgmlDType, bytes: &[u8], out: &mut [f32]) -> Result
     }
 
     match dtype {
+        GgmlDType::Q1_0 => {
+            if !out.len().is_multiple_of(128) || bytes.len() != out.len() / 128 * 18 {
+                return Err(Error::ShapeMismatch(
+                    "Q1_0 requires 18 bytes per 128 weights".into(),
+                ));
+            }
+            for (block, row) in bytes
+                .as_chunks::<18>()
+                .0
+                .iter()
+                .zip(out.as_chunks_mut::<128>().0)
+            {
+                let scale = f16::from_le_bytes([block[0], block[1]]).to_f32();
+                if !scale.is_finite() {
+                    return Err(Error::ShapeMismatch("Q1_0 scale must be finite".into()));
+                }
+                for (index, value) in row.iter_mut().enumerate() {
+                    *value = if block[2 + index / 8] & (1 << (index % 8)) == 0 {
+                        -scale
+                    } else {
+                        scale
+                    };
+                }
+            }
+        }
         GgmlDType::F32 => dequant!(f32),
         GgmlDType::F16 => dequant!(f16),
         GgmlDType::BF16 => dequant!(bf16),

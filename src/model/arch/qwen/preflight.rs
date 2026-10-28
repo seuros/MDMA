@@ -1,4 +1,4 @@
-use super::Qwen;
+use super::{Qwen, yarn};
 use crate::backend::{Backend, Operation, Result};
 use crate::gguf::GgufModel;
 use crate::memory::product;
@@ -55,6 +55,7 @@ pub(in crate::model) fn config(g: &GgufModel, arch: &str) -> Result<ModelConfig>
     };
     product(&[n_heads, head_dim])?;
     product(&[n_kv_heads, head_dim])?;
+    yarn::Yarn::read(g, arch, &c)?;
     let prefix = format!("{arch}.");
     for key in g.metadata_keys().filter(|k| k.starts_with(&prefix)) {
         match &key[prefix.len()..] {
@@ -64,6 +65,7 @@ pub(in crate::model) fn config(g: &GgufModel, arch: &str) -> Result<ModelConfig>
             | "rope.dimension_count"
             | "vocab_size" => {}
             "attention.causal" if g.metadata_bool(key) == Some(true) => {}
+            suffix if yarn::is_key(suffix) => {}
             "rope.dimension_sections" if arch == "qwen2vl" => {
                 let sections = g
                     .metadata_u32_array(key)
@@ -96,6 +98,9 @@ impl<B: Backend> Qwen<B> {
             )));
         }
         let mut required = vec![Operation::RopeSplitHalf];
+        if yarn::Yarn::read(g, arch, &c)?.is_some_and(|y| y.amplitude() != 1.0) {
+            required.push(Operation::Scale);
+        }
         if arch != "qwen3" {
             required.push(Operation::AddBias);
         }

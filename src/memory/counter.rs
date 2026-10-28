@@ -46,6 +46,7 @@ pub(super) struct Charge {
 }
 
 impl Charge {
+    #[cfg(any(feature = "service", test))]
     pub(super) fn split(&mut self, bytes: usize) -> Self {
         self.bytes = self
             .bytes

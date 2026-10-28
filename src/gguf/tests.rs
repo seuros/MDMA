@@ -24,7 +24,9 @@ pub(crate) fn weight(shape: &[usize], dtype: GgmlDType, seed: usize) -> QTensor 
         .collect();
     QTensor::quantize(
         &Tensor::from_vec(values, shape, &Device::Cpu).unwrap(),
-        dtype,
+        dtype
+            .candle()
+            .expect("fixture quantizer supports this dtype"),
     )
     .unwrap()
 }

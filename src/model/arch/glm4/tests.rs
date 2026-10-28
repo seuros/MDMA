@@ -47,7 +47,7 @@ fn fixture(width: usize, head: usize, rot: usize) -> Fixture {
             let t = Tensor::from_vec(values, &[width], &Device::Cpu).unwrap();
             f.tensors.push((
                 format!("blk.{i}.{name}.weight"),
-                QTensor::quantize(&t, GgmlDType::F32).unwrap(),
+                QTensor::quantize(&t, GgmlDType::F32.candle().unwrap()).unwrap(),
             ));
         }
     }
@@ -364,7 +364,9 @@ fn glm4_rocm_matches_cpu_and_uses_eager_decode() {
                     GgmlDType::Q5K
                 } else {
                     GgmlDType::Q6K
-                },
+                }
+                .candle()
+                .unwrap(),
             )
             .unwrap();
         }

@@ -35,7 +35,7 @@ pub(super) fn matmul(
         GgmlDType::Q5K => rows::<BlockQ5K>(&w.buf.0, x, y, shape),
         GgmlDType::Q6K => rows::<BlockQ6K>(&w.buf.0, x, y, shape),
         GgmlDType::Q8K => rows::<BlockQ8K>(&w.buf.0, x, y, shape),
-        GgmlDType::F32 | GgmlDType::F16 | GgmlDType::BF16 => false,
+        GgmlDType::F32 | GgmlDType::F16 | GgmlDType::BF16 | GgmlDType::Q1_0 => false,
     }
 }
 

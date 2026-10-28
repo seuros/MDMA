@@ -17,7 +17,7 @@ pub mod pyjson;
 pub mod tokenizer;
 pub use crate::model::weights;
 
-#[cfg(test)]
+#[cfg(all(test, feature = "service"))]
 pub(crate) mod compat_tests;
 #[cfg(test)]
 mod tests;

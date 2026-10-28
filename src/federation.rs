@@ -25,24 +25,40 @@
 //! route aliases additionally require current imports and local caller consent.
 //! No configuration automatically enrolls a peer or approves either permission.
 
+#[cfg(feature = "service")]
 pub mod admin;
 pub mod canonical_json;
+#[cfg(feature = "service")]
 pub mod catalog;
+#[cfg(feature = "service")]
 pub mod catalog_cache;
+#[cfg(feature = "service")]
 pub mod config;
+#[cfg(feature = "service")]
 pub mod control;
+#[cfg(feature = "service")]
 pub(crate) mod execution;
+#[cfg(feature = "service")]
 pub(crate) mod install;
+#[cfg(feature = "service")]
 pub(crate) mod inventory;
 pub mod profile;
+#[cfg(feature = "service")]
 pub(crate) mod push;
+#[cfg(feature = "service")]
 pub(crate) mod routing;
+#[cfg(feature = "service")]
 pub mod runtime;
+#[cfg(feature = "service")]
 pub mod server_id;
+#[cfg(feature = "service")]
 pub mod signing;
+#[cfg(feature = "service")]
 pub mod tls;
+#[cfg(feature = "service")]
 pub(crate) mod topology;
+#[cfg(feature = "service")]
 pub mod trust;
 
-#[cfg(test)]
+#[cfg(all(test, feature = "service"))]
 mod tests;

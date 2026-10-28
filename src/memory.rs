@@ -105,6 +105,7 @@ pub(crate) struct Reservation {
 
 impl Reservation {
     /// Carve `bytes` out of this reservation and account them as `category`.
+    #[cfg(any(feature = "service", test))]
     pub(crate) fn split_as(&mut self, bytes: usize, category: MemoryCategory) -> Self {
         let charge = self.charge.split(bytes);
         if category != self.category {

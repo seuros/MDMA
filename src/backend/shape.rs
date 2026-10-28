@@ -21,6 +21,20 @@ pub fn elems(op: &str, bytes: usize) -> Result<usize> {
     Ok(bytes / size_of::<f32>())
 }
 
+pub fn argmax(n: usize, index_bytes: usize) -> Result<()> {
+    if n == 0 || n > u32::MAX as usize || index_bytes != size_of::<u32>() {
+        return Err(err("argmax requires a nonempty u32-indexable vector and one u32 output".into()));
+    }
+    Ok(())
+}
+
+pub fn norm_epsilon(eps: f32) -> Result<()> {
+    if !eps.is_finite() || eps <= 0.0 {
+        return Err(err("normalization requires positive finite epsilon".into()));
+    }
+    Ok(())
+}
+
 /// `[offset, offset + len)` lies inside `cap` bytes (upload/download/copy).
 pub fn range(op: &str, offset: usize, len: usize, cap: usize) -> Result<()> {
     match offset.checked_add(len) {

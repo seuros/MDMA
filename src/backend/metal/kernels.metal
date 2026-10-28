@@ -7,6 +7,70 @@
 #endif
 using namespace metal;
 
+kernel void layernorm_f32(
+    device const float* w [[buffer(0)]], device const float* bias [[buffer(1)]],
+    device const float* x [[buffer(2)]], device float* y [[buffer(3)]],
+    constant uint* p [[buffer(4)]], uint group [[threadgroup_position_in_grid]],
+    uint sg [[simdgroup_index_in_threadgroup]], uint lane [[thread_index_in_simdgroup]],
+    uint lanes [[threads_per_simdgroup]], uint groups [[simdgroups_per_threadgroup]]
+) {
+    ulong row = ulong(group) * groups + sg;
+    if (row >= p[1]) return;
+    ulong base = row * p[0];
+    float sum = 0.0f;
+    for (ulong i = lane; i < p[0]; i += lanes) sum += x[base + i];
+    float mean = simd_sum(sum) / float(p[0]);
+    float variance = 0.0f;
+    for (ulong i = lane; i < p[0]; i += lanes) {
+        float centered = x[base + i] - mean;
+        variance += centered * centered;
+    }
+    float scale = 1.0f / sqrt(simd_sum(variance) / float(p[0]) + as_type<float>(p[2]));
+    for (ulong i = lane; i < p[0]; i += lanes)
+        y[base + i] = (x[base + i] - mean) * scale * w[i] + (p[3] ? bias[i] : 0.0f);
+}
+
+kernel void gelu_f32(
+    device const float* x [[buffer(0)]], device float* y [[buffer(1)]],
+    constant uint* p [[buffer(2)]], uint i [[thread_position_in_grid]]
+) {
+    if (i >= p[0]) return;
+    // Same erf approximation as the CPU oracle (not tanh GELU).
+    float z = x[i] * 0.7071067811865475f;
+    float t = 1.0f / (1.0f + 0.3275911f * abs(z));
+    float poly = t * (0.254829592f + t * (-0.284496736f + t * (1.421413741f
+        + t * (-1.453152027f + t * 1.061405429f))));
+    float erf_z = copysign(1.0f - poly * exp(-z * z), z);
+    y[i] = 0.5f * x[i] * (1.0f + erf_z);
+}
+
+kernel void add_bias_f32(
+    device const float* bias [[buffer(0)]], device float* y [[buffer(1)]],
+    constant uint* p [[buffer(2)]], uint i [[thread_position_in_grid]]
+) {
+    if (i < p[0]) y[i] += bias[i % p[1]];
+}
+
+kernel void argmax_f32(
+    device const float* x [[buffer(0)]], device uint* index [[buffer(1)]],
+    constant uint* p [[buffer(2)]], uint sg [[simdgroup_index_in_threadgroup]],
+    uint lane [[thread_index_in_simdgroup]], uint lanes [[threads_per_simdgroup]]
+) {
+    if (sg != 0) return;
+    float best = -INFINITY;
+    uint at = 0xffffffffu;
+    bool invalid = false;
+    for (ulong i = lane; i < p[0]; i += lanes) {
+        float value = x[i];
+        invalid = invalid || !isfinite(value);
+        if (value > best || (value == best && i < at)) { best = value; at = uint(i); }
+    }
+    float maximum = simd_max(best);
+    uint winner = simd_min(best == maximum ? at : 0xffffffffu);
+    bool bad = simd_any(invalid);
+    if (lane == 0) index[0] = bad ? 0xffffffffu : winner;
+}
+
 // DTYPE_* and dispatch constants are injected by metal/abi.rs.
 inline float weight_at(device const uchar* w, ulong index, uint dtype) {
     if (dtype == DTYPE_F32) return reinterpret_cast<device const float*>(w)[index];

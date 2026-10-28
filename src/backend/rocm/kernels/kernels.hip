@@ -1,6 +1,7 @@
 // HIP kernels for mdma's ROCm backend, gfx1201 (RDNA4) target.
 #include <hip/hip_runtime.h>
 #include <hip/hip_fp16.h>
+#include "hybrid.hip"
 
 // Dtype codes must match backend/dtype_code.rs.
 #define DT_F32 0

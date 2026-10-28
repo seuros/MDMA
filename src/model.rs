@@ -8,6 +8,7 @@ use std::sync::Arc;
 pub mod arch;
 pub mod decoder;
 pub mod hybrid;
+pub mod hybrid_agent;
 pub(crate) mod layers;
 pub mod planning;
 pub mod weights;
@@ -494,6 +495,8 @@ impl<B: Backend> Workspace<B> {
     }
 }
 
+#[cfg(test)]
+mod bonsai_tests;
 #[cfg(test)]
 mod checkpoint_tests;
 #[cfg(test)]

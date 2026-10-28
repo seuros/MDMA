@@ -351,6 +351,7 @@ macro_rules! arg {
 }
 
 mod decoder_ops;
+mod hybrid;
 
 impl Backend for HipBackend {
     type Buf = HipBuf;
@@ -425,6 +426,9 @@ impl Backend for HipBackend {
                 | Operation::WindowedAttention
                 | Operation::AddBias
                 | Operation::RopePartialInterleaved
+                | Operation::LayerNorm
+                | Operation::Gelu
+                | Operation::Argmax
         )
     }
 
@@ -435,6 +439,14 @@ impl Backend for HipBackend {
     fn max_head_dim(&self) -> Option<usize> {
         Some(512)
     }
+
+    fn layernorm(&self, w: &HipBuf, bias: Option<&HipBuf>, x: &HipBuf, y: &mut HipBuf, eps: f32) -> Result<()> {
+        self.hybrid_layernorm(w, bias, x, y, eps)
+    }
+
+    fn gelu(&self, x: &HipBuf, y: &mut HipBuf) -> Result<()> { self.hybrid_gelu(x, y) }
+
+    fn argmax(&self, x: &HipBuf, index: &mut HipBuf) -> Result<()> { self.hybrid_argmax(x, index) }
 
     fn scale(&self, x: &mut HipBuf, factor: f32) -> Result<()> {
         if !factor.is_finite() {

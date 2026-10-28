@@ -29,6 +29,7 @@ fn unsupported_formats_never_get_a_kernel_tag() {
         GgmlDType::Q3K,
         GgmlDType::Q5K,
         GgmlDType::Q8K,
+        GgmlDType::Q1_0,
     ] {
         assert_matches!(code(dtype), Err(Error::NotImplemented(_)));
     }
@@ -36,6 +37,7 @@ fn unsupported_formats_never_get_a_kernel_tag() {
 
 #[test]
 fn decoder_formats_do_not_change_legacy_capabilities() {
+    assert_matches!(decoder_code(GgmlDType::Q1_0), Err(Error::NotImplemented(_)));
     for (dtype, tag, quant, size) in [
         (GgmlDType::BF16, 4, false, 0),
         (GgmlDType::Q5K, 5, true, 176),
